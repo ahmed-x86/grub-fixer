@@ -1,34 +1,51 @@
-# GRUB Fixer (V5)
+# 🛠️ GRUB Fixer (V6 - Auto-Detect Edition)
 
-An automated, failsafe Bash script designed to repair the GRUB bootloader on UEFI Linux systems via a live chroot environment. This tool automates the tedious process of mounting, binding system directories, and reinstalling GRUB.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. This version introduces **Smart Auto-Detection**, allowing you to fix your bootloader with a single confirmation, while maintaining a failsafe manual mode.
 
 ## 🚀 Usage
 
-Run the following commands directly from your terminal in any Live Linux environment (Arch, EndeavourOS, Ubuntu, Fedora, etc.):
+You can choose between the quick one-liner or the manual download method depending on your environment.
 
+### Option 1: Quick One-Liner (Recommended)
+Run the script directly without downloading:
 ```bash
-curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/refs/heads/main/grub-fixer.sh
+curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | bash
+```
+
+### Option 2: Manual Download & Execute
+If you prefer to have the file locally or the one-liner doesn't suit your environment:
+```bash
+curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh
 ```
 
-## ✨ New in V5 (Bulletproof Edition)
-* **VM & NVRAM Rescue:** Added the `--removable` flag to `grub-install` to guarantee successful booting on Virtual Machines and stubborn UEFI firmware that drop NVRAM entries.
-* **Input Collision Prevention:** `read` commands now strictly fetch input from `/dev/tty`, eliminating terminal buffer conflicts and pipeline issues.
+---
 
-## 🛠 Core Features
-* **Safety First:** Implemented `set -e` to stop execution immediately if any command fails, preventing system damage.
-* **Automatic Cleanup:** Detects and unmounts any existing processes on `/mnt` before starting to avoid conflicts.
-* **Improved Validation:** Forces Root partition input and strictly verifies partition existence in `/dev/` before proceeding.
-* **Smart OS Detection:** Automatically detects the distribution name from `/etc/os-release` to set the correct Bootloader ID.
-* **Zero-Intervention Chroot:** Executes all repair commands (`grub-install` and `grub-mkconfig`) automatically inside the chroot environment using EOF blocks.
-* **Clean Exit:** Automatically unmounts all filesystems recursively after a successful repair.
+## ✨ New in V6 (The Smart Update)
+* **Smart Auto-Detection:** Scans partitions using `lsblk` and `awk` to suggest the most likely **Root (/)** and **EFI (/boot/efi)**.
+* **UX Proposal Flow:** Presents a "Proposal" box. Press **'y'** to proceed instantly or **'n'** to enter manual mode.
+* **Metadata Scanning:** Detects file systems (`ext4`, `btrfs`, `xfs`, `vfat`) without mounting, ensuring a fast pre-scan.
+
+## 💎 Features from V5 (Bulletproof Edition)
+* **VM & NVRAM Rescue:** Uses the `--removable` flag to guarantee booting on Virtual Machines and stubborn UEFI firmware.
+* **Pipeline Ready:** Redirected `read` commands to `/dev/tty`, making it 100% compatible with `curl | bash`.
+* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup.
+
+---
 
 ## 📋 Requirements
-* **Environment:** Booted into a Live Linux ISO/USB.
+* **Environment:** Live Linux ISO/USB (Arch, Ubuntu, Fedora, etc.).
 * **Architecture:** Target system must be UEFI (`x86_64-efi`).
 * **Privileges:** Sudo/Root access required.
-* **Network:** Active internet connection to fetch the script.
+
+## 🛠️ Planned for Future
+* **BIOS (Legacy) Support.**
+* **LUKS (Encryption) & LVM Support.**
+* **Full fstab Parsing:** For automatic detection of complex `/boot` setups.
 
 ## ⚠️ Disclaimer
-Currently supports **UEFI (x86_64-efi)** only. Support for BIOS (Legacy), LUKS (Encryption), and LVM is planned for future releases.
+This tool is intended for **UEFI** systems. Always verify the auto-detected partitions before confirming the repair process.
+
+---
+
