@@ -18,6 +18,7 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V10: Bulletproof Btrfs loop (forced y/n), fixed Archinstall /boot vs /boot/efi trap.
 # V11: Zero-Interaction Mode (fstab parser), 3-Tier Fallback System.
 # V12: Added Legacy BIOS (i386-pc) support, auto-detection, and Target Disk extraction.
+# V13: Added OS Prober support to automatically detect dual-boot systems (e.g., Windows).
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
@@ -34,7 +35,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V12: Ultimate Automation & Legacy BIOS"
+echo "GRUB Fixer V13: Ultimate Automation, Legacy BIOS & OS Prober"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi & i386-pc (Legacy)"
 echo "=========================================="
@@ -518,6 +519,12 @@ if [ "$BOOT_MODE" == "efi" ]; then
 else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
     grub-install --target=i386-pc "$TARGET_DISK"
+fi
+
+echo "-> Enabling OS Prober to detect other operating systems (e.g., Windows)..."
+if [ -f /etc/default/grub ]; then
+    sed -i '/GRUB_DISABLE_OS_PROBER/d' /etc/default/grub
+    echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
 fi
 
 echo "-> Generating GRUB configuration..."
