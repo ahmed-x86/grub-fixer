@@ -15,6 +15,7 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V7: Added dynamic support for mounting custom volumes (e.g., /home, /var).
 # V8: Added Root Validation, System Logging, and Smart EFI Detection.
 # V9: Added dynamic Btrfs subvolumes support with smart routing.
+# V10: Bulletproof Btrfs loop (forced y/n), fixed Archinstall /boot vs /boot/efi trap.
 # FUTURE: Support for BIOS (Legacy), LUKS, and full fstab parsing.
 # ==============================================================================
 
@@ -31,7 +32,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V9: Btrfs & Smart Detection"
+echo "GRUB Fixer V10: Btrfs & Smart Detection"
 echo "Date: $(date)"
 echo "Currently supports x86_64-efi only."
 echo "=========================================="
@@ -79,9 +80,9 @@ else
 fi
 
 if [ -n "$AUTO_EFI" ]; then
-    echo "  EFI (/boot/efi) : /dev/$AUTO_EFI (Verified /EFI directory)"
+    echo "  EFI Partition   : /dev/$AUTO_EFI (Verified /EFI directory)"
 else
-    echo "  EFI (/boot/efi) : [NOT FOUND]"
+    echo "  EFI Partition   : [NOT FOUND]"
 fi
 echo "  Boot (/boot)    : [No separate partition assumed]"
 echo "==============================="
@@ -98,6 +99,13 @@ if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
     if [ -n "$AUTO_EFI" ]; then
         efi_ans="y"
         efi_part="$AUTO_EFI"
+        
+        # [V10 Fix]: Ask where to mount EFI to catch Archinstall /boot logic
+        echo ""
+        echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
+        echo "    (If you used archinstall, it is usually /boot)"
+        read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
+        efi_mount_path=${efi_mount_path:-/boot}
     else
         efi_ans="n"
     fi
@@ -120,11 +128,14 @@ else
         fi
     done
 
-    read -p "Did you create a /boot/efi partition? (y/n): " efi_ans </dev/tty
+    read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
     if [ "$efi_ans" == "y" ]; then
         while true; do
             read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
             if [ -b "/dev/$efi_part" ]; then
+                # [V10 Fix]: Ask where to mount EFI in manual mode too
+                read -p "-> Where should it be mounted? (e.g., /boot or /boot/efi) [default: /boot/efi]: " efi_mount_path </dev/tty
+                efi_mount_path=${efi_mount_path:-/boot/efi}
                 break 
             else
                 echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
@@ -217,9 +228,19 @@ if [ "$ROOT_FSTYPE" == "btrfs" ]; then
         sudo mkdir -p "$TARGET_MNT"
         sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
         
-        # Ask if there are more subvolumes
-        read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
-        if [ "$more_btrfs" != "y" ]; then
+        # Ask if there are more subvolumes - [V10 Fix]: Bulletproof loop
+        while true; do
+            read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
+            more_btrfs=$(echo "$more_btrfs" | tr '[:upper:]' '[:lower:]')
+            
+            if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then
+                break
+            else
+                echo "   [-] Invalid input. Please type 'y' for YES or 'n' for NO."
+            fi
+        done
+        
+        if [ "$more_btrfs" == "n" ]; then
             break
         fi
     done
@@ -236,11 +257,11 @@ if [ "$boot_ans" == "y" ]; then
     sudo mount /dev/$boot_part /mnt/boot
 fi
 
-# Mount EFI
+# Mount EFI (Dynamic path based on user input for V10)
 if [ "$efi_ans" == "y" ]; then
-    echo "-> Mounting EFI Partition (/dev/$efi_part)..."
-    sudo mkdir -p /mnt/boot/efi
-    sudo mount /dev/$efi_part /mnt/boot/efi
+    echo "-> Mounting EFI Partition (/dev/$efi_part) to /mnt$efi_mount_path..."
+    sudo mkdir -p "/mnt$efi_mount_path"
+    sudo mount /dev/$efi_part "/mnt$efi_mount_path"
 fi
 
 # Mount Custom Partitions
@@ -281,7 +302,7 @@ sudo chroot /mnt /bin/bash <<EOF
 set -e
 
 echo "-> Installing for x86_64-efi platform (with --removable flag for VM support)..."
-grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$OS_NAME" --removable
+grub-install --target=x86_64-efi --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
 
 echo "-> Generating GRUB configuration..."
 grub-mkconfig -o /boot/grub/grub.cfg
