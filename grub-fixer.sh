@@ -34,9 +34,9 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V11: Ultimate Automation & FSTAB"
+echo "GRUB Fixer V12: Ultimate Automation & Legacy BIOS"
 echo "Date: $(date)"
-echo "Currently supports x86_64-efi only."
+echo "Currently supports: x86_64-efi & i386-pc (Legacy)"
 echo "=========================================="
 echo ""
 
@@ -51,8 +51,13 @@ if grep -qs ' /tmp/grub-fixer-scan' /proc/mounts; then
     sudo umount -R /tmp/grub-fixer-scan 2>/dev/null || true
 fi
 
+# Variables for V12 Legacy support
+BOOT_MODE="legacy" # Default to legacy until proven it's EFI
+efi_mount_path=""
+root_part=""
+
 # ==============================================================================
-# TIER 1: PRO FSTAB AUTO-DETECTION (V11)
+# TIER 1: PRO FSTAB AUTO-DETECTION (V11/V12)
 # ==============================================================================
 echo "[*] TIER 1: Initializing Deep Scan for fstab..."
 
@@ -145,10 +150,10 @@ if [ $FSTAB_FOUND -eq 1 ]; then
     if [[ "$pro_ans" == "y" || "$pro_ans" == "Y" ]]; then
         PRO_MODE_ACCEPTED=1
     else
-        echo "[-] Pro Mode rejected by user. Falling back to V10 Logic..."
+        echo "[-] Pro Mode rejected by user. Falling back to Auto-Detect Logic..."
     fi
 else
-    echo "[-] fstab not found or couldn't be parsed. Falling back to V10 Logic..."
+    echo "[-] fstab not found or couldn't be parsed. Falling back to Auto-Detect Logic..."
     umount "$SCAN_MNT" 2>/dev/null || true
     rm -rf "$SCAN_MNT"
 fi
@@ -169,6 +174,7 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
     
     if [ $root_idx -ne -1 ]; then
         r_dev="${FSTAB_DEVS[$root_idx]}"
+        root_part=$(basename "$r_dev") # Save root_part for Legacy Disk Extraction later
         r_opts="${FSTAB_OPTS[$root_idx]}"
         r_type="${FSTAB_TYPES[$root_idx]}"
         
@@ -206,16 +212,18 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
             else
                 sudo mount "$c_dev" "/mnt$c_mnt"
             fi
-        done
-        
-        # Determine EFI path for GRUB install (Default fallback if not found in fstab)
-        efi_mount_path="/boot/efi" 
-        for i in "${!FSTAB_MNTS[@]}"; do
-            if [[ "${FSTAB_TYPES[$i]}" == "vfat" && ("${FSTAB_MNTS[$i]}" == "/boot" || "${FSTAB_MNTS[$i]}" == "/boot/efi") ]]; then
-                efi_mount_path="${FSTAB_MNTS[$i]}"
-                break
+            
+            # Detect if EFI from FSTAB
+            if [[ "$c_type" == "vfat" && ("$c_mnt" == "/boot" || "$c_mnt" == "/boot/efi") ]]; then
+                BOOT_MODE="efi"
+                efi_mount_path="$c_mnt"
             fi
         done
+        
+        # If FSTAB didn't have explicitly vfat /boot or /boot/efi but EFI is needed, we set a default
+        if [ -z "$efi_mount_path" ]; then
+            efi_mount_path="/boot/efi" 
+        fi
     fi
 fi
 
@@ -276,6 +284,7 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
         root_part="$SUGGESTED_ROOT"
         
         if [ -n "$AUTO_EFI" ]; then
+            BOOT_MODE="efi"
             efi_ans="y"
             efi_part="$AUTO_EFI"
             
@@ -286,6 +295,7 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
             read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
             efi_mount_path=${efi_mount_path:-/boot}
         else
+            BOOT_MODE="legacy"
             efi_ans="n"
         fi
         
@@ -309,6 +319,7 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
 
         read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
         if [ "$efi_ans" == "y" ]; then
+            BOOT_MODE="efi"
             while true; do
                 read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
                 if [ -b "/dev/$efi_part" ]; then
@@ -320,6 +331,9 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
                     echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
                 fi
             done
+        else
+            echo "[*] No EFI selected. Assuming Legacy BIOS."
+            BOOT_MODE="legacy"
         fi
 
         read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
@@ -477,15 +491,34 @@ else
     OS_NAME="Linux"
 fi
 
+# ==========================================
+# [V12] TARGET DISK EXTRACTION FOR LEGACY
+# ==========================================
+# lsblk -no PKNAME extracts the parent disk (e.g. 'sda' from 'sda1' or 'nvme0n1' from 'nvme0n1p2')
+TARGET_DISK_NAME=$(lsblk -no PKNAME "/dev/$root_part" | head -n 1)
+
+if [ -z "$TARGET_DISK_NAME" ]; then
+    # Fallback just in case it's already a whole disk or LVM
+    TARGET_DISK="/dev/$root_part"
+else
+    TARGET_DISK="/dev/$TARGET_DISK_NAME"
+fi
+
 echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
+echo "[*] Detected Boot Mode: ${BOOT_MODE^^}"
 
 # 8. Enter chroot and execute commands automatically using EOF
 sudo chroot /mnt /bin/bash <<EOF
 # Enable exit-on-error inside the chroot environment as well
 set -e
 
-echo "-> Installing for x86_64-efi platform (with --removable flag for VM support)..."
-grub-install --target=x86_64-efi --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+if [ "$BOOT_MODE" == "efi" ]; then
+    echo "-> Installing for x86_64-efi platform (with --removable flag for VM support)..."
+    grub-install --target=x86_64-efi --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+else
+    echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
+    grub-install --target=i386-pc "$TARGET_DISK"
+fi
 
 echo "-> Generating GRUB configuration..."
 grub-mkconfig -o /boot/grub/grub.cfg
@@ -498,5 +531,5 @@ EOF
 echo -e "\n[*] Unmounting filesystems..."
 sudo umount -R /mnt || true
 
-echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully."
+echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully ($BOOT_MODE mode)."
 echo "[i] A full log of this operation has been saved to: $LOG_FILE"
