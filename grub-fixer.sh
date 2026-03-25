@@ -8,26 +8,48 @@
 echo "GRUB Fixer - V1"
 echo "Currently supports x86_64-efi only."
 echo ""
+
 # 1. Show available disks
 echo "=== Available Disks ==="
 lsblk
 echo "========================"
 echo ""
 
-# 2. Ask the user and store answers
+# 2. Ask the user and store answers (with Validation)
 read -p "Did you create a /boot/efi partition? (y/n): " efi_ans
 if [ "$efi_ans" == "y" ]; then
-    read -p "What is the partition name? (e.g., vda1): " efi_part
+    while true; do
+        read -p "What is the partition name? (e.g., vda1): " efi_part
+        if [ -b "/dev/$efi_part" ]; then
+            break 
+        else
+            echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
+        fi
+    done
 fi
 
 read -p "Did you create a /boot partition? (y/n): " boot_ans
 if [ "$boot_ans" == "y" ]; then
-    read -p "What is the partition name? (e.g., vda2): " boot_part
+    while true; do
+        read -p "What is the partition name? (e.g., vda2): " boot_part
+        if [ -b "/dev/$boot_part" ]; then
+            break
+        else
+            echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
+        fi
+    done
 fi
 
 read -p "Did you create a root directory (/) partition? (y/n): " root_ans
 if [ "$root_ans" == "y" ]; then
-    read -p "What is the partition name? (e.g., vda3): " root_part
+    while true; do
+        read -p "What is the partition name? (e.g., vda3): " root_part
+        if [ -b "/dev/$root_part" ]; then
+            break
+        else
+            echo "[-] Error: Partition '/dev/$root_part' does not exist. Please try again."
+        fi
+    done
 fi
 
 echo -e "\n[*] Executing Mount commands..."
