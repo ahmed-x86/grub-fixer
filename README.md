@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V6 - Auto-Detect Edition)
+# 🛠️ GRUB Fixer (V7 - Rescue Suite Edition)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. This version introduces **Smart Auto-Detection**, allowing you to fix your bootloader with a single confirmation, while maintaining a failsafe manual mode.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. **V7** evolves from a simple fixer into a full **Rescue Suite**, allowing you to dynamically mount custom partitions like `/home`, `/var`, or `/usr` for a perfect chroot environment.
 
 ## 🚀 Usage
 
@@ -22,15 +22,20 @@ sudo ./grub-fixer.sh
 
 ---
 
-## ✨ New in V6 (The Smart Update)
+## ✨ New in V7 (The Rescue Update)
+* **Custom Volume Support:** Dynamically mount additional partitions (e.g., `/home`, `/var`, `/opt`) during the repair process.
+* **Flexible Mounting:** Uses Bash arrays to handle multiple custom mount points with automatic directory creation inside `/mnt`.
+* **Universal Chroot Prep:** Prepares a comprehensive environment, making it useful for general system recovery beyond just GRUB.
+
+## 💎 Features from V6 (The Smart Update)
 * **Smart Auto-Detection:** Scans partitions using `lsblk` and `awk` to suggest the most likely **Root (/)** and **EFI (/boot/efi)**.
 * **UX Proposal Flow:** Presents a "Proposal" box. Press **'y'** to proceed instantly or **'n'** to enter manual mode.
 * **Metadata Scanning:** Detects file systems (`ext4`, `btrfs`, `xfs`, `vfat`) without mounting, ensuring a fast pre-scan.
 
-## 💎 Features from V5 (Bulletproof Edition)
+## 🛡️ Core Safety (Bulletproof Engine)
 * **VM & NVRAM Rescue:** Uses the `--removable` flag to guarantee booting on Virtual Machines and stubborn UEFI firmware.
 * **Pipeline Ready:** Redirected `read` commands to `/dev/tty`, making it 100% compatible with `curl | bash`.
-* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup.
+* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup before and after execution.
 
 ---
 
