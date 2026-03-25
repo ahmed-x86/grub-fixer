@@ -1,6 +1,7 @@
-# 🛠️ GRUB Fixer (V12 - Ultimate Automation & Legacy BIOS Edition)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V12** bridges the gap between modern and older hardware by introducing intelligent Legacy BIOS support alongside the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
+# 🛠️ GRUB Fixer (V13 - Ultimate Automation, Legacy BIOS & OS Prober)
+
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V13** is the definitive release, bringing intelligent dual-boot detection (OS Prober) alongside Universal Boot support and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
 
 ## 🚀 Usage
 
@@ -9,22 +10,25 @@ You can choose between the quick one-liner or the manual download method dependi
 ### Option 1: Quick One-Liner (Recommended)
 Run the script directly without downloading:
 ```bash
-curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
+curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash
 ```
 
 ### Option 2: Manual Download & Execute
 If you prefer to have the file locally or want to audit the code before running:
 ```bash
-curl -O [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh)
+curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh
 ```
 
 ---
 
-## ✨ New in V12 (The Universal Boot Update)
-* **Legacy BIOS (`i386-pc`) Support:** The script is no longer restricted to UEFI. It automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
-* **Smart Target Disk Extraction:** In Legacy BIOS mode, GRUB must be installed on the drive itself (e.g., `/dev/sda`), not the partition. V12 uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition, ensuring flawless installation on older machines.
+## ✨ New in V13 (The Dual-Boot Update)
+* **OS Prober Integration:** Solves the issue where Windows or other Linux distros disappear from the GRUB menu after a repair. V13 automatically modifies `/etc/default/grub` to enable `GRUB_DISABLE_OS_PROBER=false`, ensuring all installed operating systems are detected and listed correctly.
+
+## ⚙️ Key Additions in V12 (Universal Boot)
+* **Legacy BIOS (`i386-pc`) Support:** The script automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
+* **Smart Target Disk Extraction:** In Legacy BIOS mode, V12 uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition (e.g., `/dev/sda`), ensuring flawless GRUB installation on older machines.
 
 ## 🧠 Core Features (From V11 & V10)
 * **Zero-Interaction FSTAB Parsing (Tier 1):** Automatically scans devices to locate and parse your system's `/etc/fstab`. It resolves `UUID` and `PARTUUID` tags instantly, mapping out your exact system layout (Root, Boot, EFI, and Btrfs subvolumes) without manual input.
@@ -48,3 +52,4 @@ sudo ./grub-fixer.sh
 
 ## ⚠️ Disclaimer
 While highly automated, GRUB repair touches critical system files. Always verify the auto-detected partitions, `fstab` layout, and subvolumes before confirming the repair process, especially on dual-boot systems.
+```
