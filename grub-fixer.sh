@@ -14,26 +14,58 @@ set -e # Exit immediately if a command exits with a non-zero status.
 #     Redirected 'read' from /dev/tty to fully support 'curl | bash' pipes.
 # V6: Added Auto-Detection using lsblk FSTYPE without mounting.
 # V7: Added dynamic support for mounting custom volumes (e.g., /home, /var).
+# V8: Added Root Validation, System Logging, and Smart EFI Detection.
 # FUTURE: Support for BIOS (Legacy), LUKS, LVM, and full fstab parsing.
 # ==============================================================================
 
-echo "V7: Auto-Detection & Custom Volumes Support Edition."
+# --- 1. ROOT VALIDATION ---
+if [[ $EUID -ne 0 ]]; then
+   echo "[-] Error: This script must be run as root. Please use sudo." >&2
+   exit 1
+fi
+
+# --- 2. LOGGING SYSTEM ---
+LOG_FILE="/var/log/grub-fixer.log"
+echo "[*] Logging all operations to $LOG_FILE"
+# Redirect all output (stdout and stderr) to tee, which appends to the log file and prints to screen
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================="
+echo "GRUB Fixer V8: Smart Detection & Logging"
+echo "Date: $(date)"
 echo "Currently supports x86_64-efi only."
-echo "Support for LUKS and LVM will be added in future updates"
+echo "=========================================="
 echo ""
 
-# 1. Show available disks
+# 3. Show available disks
 echo "=== Available Disks ==="
 lsblk
 echo "========================"
 echo ""
 
-echo "[*] Scanning partitions for Auto-Detection..."
+echo "[*] Scanning partitions for Smart Auto-Detection..."
 
-# --- AUTO DETECTION LOGIC ---
-# Detect EFI Partition (vfat)
-AUTO_EFI=$(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}' | head -n 1)
-# Detect Linux Root Candidates (ext4, btrfs, xfs) - We will pick the first one as a suggestion
+# --- 4. SMART AUTO DETECTION LOGIC ---
+
+# Smart Detect EFI Partition: Mount vfat partitions temporarily to check for /EFI directory
+AUTO_EFI=""
+TMP_EFI_MNT="/tmp/grub-fixer-efi-check"
+mkdir -p "$TMP_EFI_MNT"
+
+for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}'); do
+    # Try mounting read-only silently
+    if mount -o ro /dev/$part "$TMP_EFI_MNT" 2>/dev/null; then
+        if [ -d "$TMP_EFI_MNT/EFI" ]; then
+            AUTO_EFI="$part"
+            umount "$TMP_EFI_MNT" 2>/dev/null || true
+            break # Found the real EFI partition, stop searching
+        fi
+        umount "$TMP_EFI_MNT" 2>/dev/null || true
+    fi
+done
+rm -rf "$TMP_EFI_MNT"
+
+# Detect Linux Root Candidates (ext4, btrfs, xfs) - Pick the first one as a suggestion
 AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
 SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
 
@@ -47,7 +79,7 @@ else
 fi
 
 if [ -n "$AUTO_EFI" ]; then
-    echo "  EFI (/boot/efi) : /dev/$AUTO_EFI"
+    echo "  EFI (/boot/efi) : /dev/$AUTO_EFI (Verified /EFI directory)"
 else
     echo "  EFI (/boot/efi) : [NOT FOUND]"
 fi
@@ -73,7 +105,7 @@ if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
     boot_ans="n" # We assume no separate /boot if they accepted this basic layout
     
 else
-    # --- FALLBACK: V5 MANUAL INPUT (Your exact code) ---
+    # --- FALLBACK: V5 MANUAL INPUT ---
     echo "[-] Falling back to Manual Input..."
     echo ""
     
@@ -150,7 +182,7 @@ if grep -qs ' /mnt' /proc/mounts; then
     sudo umount -R /mnt 2>/dev/null || true
 fi
 
-# 3. Execute mount commands in the correct order (Root first)
+# 5. Execute mount commands in the correct order (Root first)
 sudo mount /dev/$root_part /mnt
 
 if [ "$boot_ans" == "y" ]; then
@@ -163,7 +195,7 @@ if [ "$efi_ans" == "y" ]; then
     sudo mount /dev/$efi_part /mnt/boot/efi
 fi
 
-# 3.5 Mount custom partitions
+# 5.5 Mount custom partitions
 if [ ${#custom_parts[@]} -gt 0 ]; then
     echo "-> Mounting custom volumes..."
     for i in "${!custom_parts[@]}"; do
@@ -178,13 +210,13 @@ fi
 
 echo "[*] Preparing the chroot environment..."
 
-# 4. Preparations and bind mounts
+# 6. Preparations and bind mounts
 sudo mount --bind /dev /mnt/dev
 sudo mount --bind /proc /mnt/proc
 sudo mount --bind /sys /mnt/sys
 sudo mount --bind /run /mnt/run
 
-# 5. Read the distribution name safely
+# 7. Read the distribution name safely
 if [ -f "/mnt/etc/os-release" ]; then
     source /mnt/etc/os-release
     OS_NAME=$NAME
@@ -195,7 +227,7 @@ fi
 
 echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
 
-# 6. Enter chroot and execute commands automatically using EOF
+# 8. Enter chroot and execute commands automatically using EOF
 sudo chroot /mnt /bin/bash <<EOF
 # Enable exit-on-error inside the chroot environment as well
 set -e
@@ -210,8 +242,9 @@ echo "-> Exiting chroot environment..."
 exit
 EOF
 
-# 7. Unmount and print success message
+# 9. Unmount and print success message
 echo -e "\n[*] Unmounting filesystems..."
 sudo umount -R /mnt
 
 echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully."
+echo "[i] A full log of this operation has been saved to: $LOG_FILE"
