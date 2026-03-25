@@ -13,10 +13,11 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V5: Added '--removable' to grub-install to fix VM/NVRAM EFI variable issues.
 #     Redirected 'read' from /dev/tty to fully support 'curl | bash' pipes.
 # V6: Added Auto-Detection using lsblk FSTYPE without mounting.
+# V7: Added dynamic support for mounting custom volumes (e.g., /home, /var).
 # FUTURE: Support for BIOS (Legacy), LUKS, LVM, and full fstab parsing.
 # ==============================================================================
 
-echo "V6: Added Auto-Detection using lsblk FSTYPE without mounting."
+echo "V7: Auto-Detection & Custom Volumes Support Edition."
 echo "Currently supports x86_64-efi only."
 echo "Support for LUKS and LVM will be added in future updates"
 echo ""
@@ -112,6 +113,35 @@ else
     fi
 fi
 
+# --- CUSTOM VOLUMES LOGIC ---
+declare -a custom_parts
+declare -a custom_mounts
+
+echo ""
+echo "[*] Custom Volumes (Optional)"
+while true; do
+    read -p "Do you want to mount any other partitions? (e.g., /home, /var, /usr) (y/n): " custom_ans </dev/tty
+    if [[ "$custom_ans" == "y" ]]; then
+        read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
+        if [ -b "/dev/$c_part" ]; then
+            read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
+            
+            # Ensure the mount point starts with /
+            if [[ "$c_mount" == /* ]]; then
+                custom_parts+=("$c_part")
+                custom_mounts+=("$c_mount")
+                echo "  [+] Added: /dev/$c_part will be mounted at /mnt$c_mount"
+            else
+                echo "  [-] Error: Mount point must start with '/' (e.g., /var). Try again."
+            fi
+        else
+            echo "  [-] Error: Partition '/dev/$c_part' does not exist. Try again."
+        fi
+    else
+        break
+    fi
+done
+
 echo -e "\n[*] Executing Mount commands..."
 
 # Clean up existing mounts safely
@@ -131,6 +161,19 @@ fi
 if [ "$efi_ans" == "y" ]; then
     sudo mkdir -p /mnt/boot/efi
     sudo mount /dev/$efi_part /mnt/boot/efi
+fi
+
+# 3.5 Mount custom partitions
+if [ ${#custom_parts[@]} -gt 0 ]; then
+    echo "-> Mounting custom volumes..."
+    for i in "${!custom_parts[@]}"; do
+        c_part="${custom_parts[$i]}"
+        c_mount="${custom_mounts[$i]}"
+        
+        sudo mkdir -p "/mnt$c_mount"
+        sudo mount "/dev/$c_part" "/mnt$c_mount"
+        echo "   Mounted /dev/$c_part to /mnt$c_mount"
+    done
 fi
 
 echo "[*] Preparing the chroot environment..."
