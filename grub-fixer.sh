@@ -2,11 +2,19 @@
 set -e # Exit immediately if a command exits with a non-zero status.
 
 # ==============================================================================
-# GRUB Fixer - V4
-# Currently supports x86_64-efi only.
-# Support for other architectures and BIOS (Legacy) will be added in future updates.
-# Support for LUKS and LVM will be added in future updates.
+# PROJECT: GRUB Fixer
+# AUTHOR: ahmed-x86 
+# 
+# CHANGELOG:
+# V1: Basic manual-like chroot logic for GRUB repair.
+# V2: Added input validation (checks if partition exists) and loops for user input.
+# V3: Added /mnt cleanup (umount -R) before starting to prevent mount conflicts.
+# V4: Added 'set -e' for safety, forced Root partition input, added OS detection 
+#     safety checks, and implemented automated EOF chroot execution.
+#
+# FUTURE: Support for BIOS (Legacy), LUKS, LVM, and Auto-detection.
 # ==============================================================================
+
 echo "GRUB Fixer - V4"
 echo "Currently supports x86_64-efi only."
 echo "Support for LUKS and LVM will be added in future updates"
@@ -57,10 +65,10 @@ fi
 
 echo -e "\n[*] Executing Mount commands..."
 
-# Clean up existing mounts (the 'if' statement safely catches the exit code of grep, so set -e won't kill the script here)
+# Clean up existing mounts (the 'if' statement safely catches the exit code of grep)
 if grep -qs ' /mnt' /proc/mounts; then
     echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
-    sudo umount -R /mnt 2>/dev/null
+    sudo umount -R /mnt 2>/dev/null || true
 fi
 
 # 3. Execute mount commands in the correct order (Root first)
