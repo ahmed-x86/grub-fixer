@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V11 - Ultimate Automation & FSTAB Edition)
+# 🛠️ GRUB Fixer (V12 - Ultimate Automation & Legacy BIOS Edition)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. **V11** is a massive leap forward, introducing a **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds, turning a 30-minute manual recovery into a 5-second automated task.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V12** bridges the gap between modern and older hardware by introducing intelligent Legacy BIOS support alongside the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
 
 ## 🚀 Usage
 
@@ -15,25 +15,25 @@ curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.
 ### Option 2: Manual Download & Execute
 If you prefer to have the file locally or want to audit the code before running:
 ```bash
-curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
+curl -O [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh)
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh
 ```
 
 ---
 
-## ✨ New in V11 (The Automation Update)
-* **Zero-Interaction FSTAB Parsing (Tier 1):** Automatically scans devices to locate and parse your system's `/etc/fstab`. It resolves `UUID` and `PARTUUID` tags instantly, mapping out your exact system layout (Root, Boot, EFI, and Btrfs subvolumes) without manual input.
-* **3-Tier Fallback System:** If `fstab` is missing, encrypted, or rejected, the script gracefully falls back to V10's Smart Auto-Detection (Tier 2), and finally to fully Manual Input (Tier 3), guaranteeing a crash-free experience.
-* **5-Second Rescue:** Bypasses tedious manual typing. With a single `y` confirmation, the script dynamically mounts all partitions and subvolumes, chroots, and fixes GRUB in under 5 seconds.
+## ✨ New in V12 (The Universal Boot Update)
+* **Legacy BIOS (`i386-pc`) Support:** The script is no longer restricted to UEFI. It automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
+* **Smart Target Disk Extraction:** In Legacy BIOS mode, GRUB must be installed on the drive itself (e.g., `/dev/sda`), not the partition. V12 uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition, ensuring flawless installation on older machines.
 
-## 🛡️ Features from V10 & V9
-* **Dynamic EFI Mount Logic:** Solves the common "missing kernel" trap by automatically verifying and applying the correct EFI mount path (`/boot` vs `/boot/efi`), which is especially critical for **Archinstall** and **CachyOS** setups.
+## 🧠 Core Features (From V11 & V10)
+* **Zero-Interaction FSTAB Parsing (Tier 1):** Automatically scans devices to locate and parse your system's `/etc/fstab`. It resolves `UUID` and `PARTUUID` tags instantly, mapping out your exact system layout (Root, Boot, EFI, and Btrfs subvolumes) without manual input.
+* **3-Tier Fallback System:** If `fstab` is missing, encrypted, or rejected, the script gracefully falls back to Smart Auto-Detection (Tier 2), and finally to fully Manual Input (Tier 3), guaranteeing a crash-free experience.
 * **Bulletproof Btrfs Loop:** In manual/fallback mode, an interactive loop ensures required subvolumes (e.g., `@`, `@home`, `@log`) are mounted in the correct hierarchy with strict input validation.
-* **Smart Mount Routing:** Automatically translates standard mount points to their chroot equivalents (e.g., inputting `/` correctly targets `/mnt`).
+* **Dynamic EFI Mount Logic:** Solves the common "missing kernel" trap by automatically verifying and applying the correct EFI mount path (`/boot` vs `/boot/efi`), which is critical for **Archinstall** and **CachyOS** setups.
 * **VM & NVRAM Rescue:** Uses the `--removable` flag to guarantee booting on Virtual Machines (QEMU/KVM) and stubborn UEFI firmware that drop NVRAM variables.
 
-## 💎 Core Rescue Tech
+## 💎 Advanced Rescue Tech
 * **Blackbox Logging System:** Automatically captures and logs all standard output and errors directly to `/var/log/grub-fixer.log` for a complete forensic troubleshooting trail.
 * **Pipeline Ready:** Fully compatible with `curl | bash` pipelines thanks to TTY redirection for all user inputs.
 * **OS Detection:** Automatically sources `/etc/os-release` from the target system to set the correct Bootloader ID.
@@ -43,11 +43,8 @@ sudo ./grub-fixer.sh
 
 ## 📋 Requirements
 * **Environment:** Live Linux ISO/USB (Arch, CachyOS, Fedora, Ubuntu, etc.).
-* **Architecture:** Target system must be UEFI (`x86_64-efi`).
+* **Architecture:** Target system must be UEFI (`x86_64-efi`) OR Legacy BIOS (`i386-pc`).
 * **Privileges:** Sudo/Root access required.
 
-
-
-
 ## ⚠️ Disclaimer
-This tool is currently intended for **UEFI** systems. Always verify the auto-detected partitions, `fstab` layout, and subvolumes before confirming the repair process.
+While highly automated, GRUB repair touches critical system files. Always verify the auto-detected partitions, `fstab` layout, and subvolumes before confirming the repair process, especially on dual-boot systems.
