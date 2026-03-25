@@ -42,28 +42,31 @@ fi
 echo "[*] Preparing the chroot environment..."
 
 # 4. Preparations and bind mounts
-sudo touch /mnt/grub-fixer.txt
 sudo mount --bind /dev /mnt/dev
 sudo mount --bind /proc /mnt/proc
 sudo mount --bind /sys /mnt/sys
 sudo mount --bind /run /mnt/run
 
 # 5. Read the distribution name from the broken system
-# We use source to import variables from the file directly
 source /mnt/etc/os-release
 OS_NAME=$NAME
 
-# 6. Write to the file (1, Architecture, OS name)
-echo "1" | sudo tee /mnt/grub-fixer.txt > /dev/null
-echo "x86_64-efi" | sudo tee -a /mnt/grub-fixer.txt > /dev/null
-echo "$OS_NAME" | sudo tee -a /mnt/grub-fixer.txt > /dev/null
+echo -e "\n[*] Entering chroot and repairing GRUB automatically..."
 
-# 7. Copy the current script into the chroot to run it again later
-SCRIPT_NAME=$(basename "$0")
-sudo cp "$0" "/mnt/$SCRIPT_NAME"
-sudo chmod +x "/mnt/$SCRIPT_NAME"
+# 6. Enter chroot and execute commands automatically using EOF
+sudo chroot /mnt /bin/bash <<EOF
+echo "-> Installing for x86_64-efi platform..."
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$OS_NAME"
 
-# 8. Enter the chroot jail
-echo ""
-read -p "Press Enter to enter the chroot environment, then run the script again..."
-sudo chroot /mnt /bin/bash
+echo "-> Generating GRUB configuration..."
+grub-mkconfig -o /boot/grub/grub.cfg
+
+echo "-> Exiting chroot environment..."
+exit
+EOF
+
+# 7. Unmount and print success message
+echo -e "\n[*] Unmounting filesystems..."
+sudo umount -R /mnt
+
+echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully."
