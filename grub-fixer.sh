@@ -9,13 +9,14 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V1: Basic manual-like chroot logic for GRUB repair.
 # V2: Added input validation (checks if partition exists) and loops for user input.
 # V3: Added /mnt cleanup (umount -R) before starting to prevent mount conflicts.
-# V4: Added 'set -e' for safety, forced Root partition input, added OS detection 
-#     safety checks, and implemented automated EOF chroot execution.
+# V4: Added 'set -e' for safety, forced Root partition input, OS detection.
+# V5: Added '--removable' to grub-install to fix VM/NVRAM EFI variable issues.
+#     Redirected 'read' from /dev/tty to fully support 'curl | bash' pipes.
 #
 # FUTURE: Support for BIOS (Legacy), LUKS, LVM, and Auto-detection.
 # ==============================================================================
 
-echo "GRUB Fixer - V4"
+echo "GRUB Fixer - V5 (Bulletproof Edition)"
 echo "Currently supports x86_64-efi only."
 echo "Support for LUKS and LVM will be added in future updates"
 echo ""
@@ -27,11 +28,12 @@ echo "========================"
 echo ""
 
 # 2. Ask the user and store answers (with Validation)
+# Notice the </dev/tty which forces read from terminal instead of stdin pipe
 
 # Root partition is REQUIRED
 echo "[*] Root partition is REQUIRED to repair the system."
 while true; do
-    read -p "What is the Root (/) partition name? (e.g., vda3): " root_part
+    read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
     if [ -b "/dev/$root_part" ]; then
         break
     else
@@ -39,10 +41,10 @@ while true; do
     fi
 done
 
-read -p "Did you create a /boot/efi partition? (y/n): " efi_ans
+read -p "Did you create a /boot/efi partition? (y/n): " efi_ans </dev/tty
 if [ "$efi_ans" == "y" ]; then
     while true; do
-        read -p "What is the partition name? (e.g., vda1): " efi_part
+        read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
         if [ -b "/dev/$efi_part" ]; then
             break 
         else
@@ -51,10 +53,10 @@ if [ "$efi_ans" == "y" ]; then
     done
 fi
 
-read -p "Did you create a separate /boot partition? (y/n): " boot_ans
+read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
 if [ "$boot_ans" == "y" ]; then
     while true; do
-        read -p "What is the partition name? (e.g., vda2): " boot_part
+        read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
         if [ -b "/dev/$boot_part" ]; then
             break
         else
@@ -108,8 +110,8 @@ sudo chroot /mnt /bin/bash <<EOF
 # Enable exit-on-error inside the chroot environment as well
 set -e
 
-echo "-> Installing for x86_64-efi platform..."
-grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$OS_NAME"
+echo "-> Installing for x86_64-efi platform (with --removable flag for VM support)..."
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$OS_NAME" --removable
 
 echo "-> Generating GRUB configuration..."
 grub-mkconfig -o /boot/grub/grub.cfg
