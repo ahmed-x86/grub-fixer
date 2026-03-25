@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# GRUB Fixer - V2
+# GRUB Fixer - V3
 # Currently supports x86_64-efi only.
 # Support for other architectures and BIOS (Legacy) will be added in future updates.
 # Support for LUKS and lvm  will be added in future updates
 # ==============================================================================
-echo "GRUB Fixer - V2"
+echo "GRUB Fixer - V3"
 echo "Currently supports x86_64-efi only."
 echo "Support for LUKS and lvm  will be added in future updates"
 echo ""
@@ -55,6 +55,13 @@ if [ "$root_ans" == "y" ]; then
 fi
 
 echo -e "\n[*] Executing Mount commands..."
+
+
+if grep -qs ' /mnt' /proc/mounts; then
+    echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
+    sudo umount -R /mnt 2>/dev/null
+fi
+# ---------------------------
 
 # 3. Execute mount commands in the correct order (Root first)
 if [ "$root_ans" == "y" ]; then
