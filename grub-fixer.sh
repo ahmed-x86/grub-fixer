@@ -5,7 +5,9 @@
 # Currently supports x86_64-efi only.
 # Support for other architectures and BIOS (Legacy) will be added in future updates.
 # ==============================================================================
-
+echo "GRUB Fixer - V1"
+echo "Currently supports x86_64-efi only."
+echo ""
 # 1. Show available disks
 echo "=== Available Disks ==="
 lsblk
