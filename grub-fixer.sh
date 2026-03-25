@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# ==============================================================================
+# GRUB Fixer - V1
+# Currently supports x86_64-efi only.
+# Support for other architectures and BIOS (Legacy) will be added in future updates.
+# ==============================================================================
+
 # 1. Show available disks
 echo "=== Available Disks ==="
 lsblk
