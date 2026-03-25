@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# GRUB Fixer - V1
+# GRUB Fixer - V2
 # Currently supports x86_64-efi only.
 # Support for other architectures and BIOS (Legacy) will be added in future updates.
 # Support for LUKS and lvm  will be added in future updates
