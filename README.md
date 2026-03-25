@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V8 - Smart & Secure Edition)
+# 🛠️ GRUB Fixer (V9 - Btrfs & Smart Detection Edition)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. **V8** evolves the tool into a highly secure, intelligent **Rescue Suite**, featuring active logging, strict validations, and smart partition verification to ensure a flawless chroot environment and recovery process.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on UEFI Linux systems. **V9** evolves the tool to support complex filesystems like Btrfs out-of-the-box, making it a highly secure, intelligent **Rescue Suite** for both beginners and power users (Arch/Fedora).
 
 ## 🚀 Usage
 
@@ -22,22 +22,21 @@ sudo ./grub-fixer.sh
 
 ---
 
-## ✨ New in V8 (The Smart & Secure Update)
-* **Smart EFI Validation:** No longer blindly trusts any `vfat` partition. It temporarily mounts candidates in `/tmp` to actively verify the existence of the `/EFI` directory, preventing accidental GRUB installations on random USB drives. 
-* **Blackbox Logging System:** Automatically captures and logs all standard output and errors (stdout/stderr) directly to `/var/log/grub-fixer.log`. If a chroot command fails, you now have a complete forensic trail for troubleshooting.
-* **Fail-Fast Root Validation:** Instantly halts execution with a clean error message if the script is not initiated with `sudo` (checks `$EUID`), preventing messy, partial executions.
+## ✨ New in V9 (The Btrfs & Smart Routing Update)
+* **Dynamic Btrfs Subvolumes Support:** Automatically detects if the target Root partition is `btrfs` and launches an interactive, smart loop to mount required subvolumes (e.g., `@`, `@home`, `@log`) before chrooting. 
+* **Smart Mount Routing:** Prevents user error by automatically translating standard mount points to their chroot equivalents (e.g., inputting `/` automatically mounts to `/mnt`).
 
-## 💎 Features from V7 (The Rescue Update)
-* **Custom Volume Support:** Dynamically mount additional partitions (e.g., `/home`, `/var`, `/opt`) during the repair process.
-* **Flexible Mounting:** Uses Bash arrays to handle multiple custom mount points with automatic directory creation inside `/mnt`.
-* **Universal Chroot Prep:** Prepares a comprehensive environment, making it useful for general system recovery beyond just GRUB.
+## 🛡️ Features from V8 (The Smart & Secure Update)
+* **Smart EFI Validation:** Actively verifies the existence of the `/EFI` directory by temporarily mounting candidates in `/tmp`, preventing accidental GRUB installations on random USB drives. 
+* **Blackbox Logging System:** Automatically captures and logs all standard output and errors directly to `/var/log/grub-fixer.log` for a complete forensic troubleshooting trail.
+* **Fail-Fast Root Validation:** Instantly halts execution cleanly if the script is not initiated with `sudo` (`$EUID` check).
 
-## 🧠 Core Features (V6 & Below)
-* **Intelligent Auto-Detection:** Scans partitions using `lsblk` and `awk` to suggest the most likely **Root (/)**. Detects file systems (`ext4`, `btrfs`, `xfs`) without mounting, ensuring a lightning-fast pre-scan.
-* **UX Proposal Flow:** Presents a "Proposal" box. Press **'y'** to proceed instantly or **'n'** to enter manual fallback mode.
+## 💎 Core Rescue Features (V7 & Below)
+* **Custom Volume Support:** Dynamically mount additional external partitions (e.g., a separate `/home` drive) during the repair process.
+* **Intelligent Auto-Detection:** Scans partitions using `lsblk` and `awk` to suggest the most likely **Root (/)**. Detects filesystems without mounting for a lightning-fast pre-scan.
 * **VM & NVRAM Rescue:** Uses the `--removable` flag to guarantee booting on Virtual Machines and stubborn UEFI firmware that drop NVRAM variables.
 * **Pipeline Ready:** Redirected `read` commands to `/dev/tty`, making it 100% compatible with `curl | bash` pipelines.
-* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup before and after execution to prevent mount conflicts.
+* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup to prevent mount conflicts.
 
 ---
 
@@ -49,9 +48,9 @@ sudo ./grub-fixer.sh
 ## 🛠️ Planned for Future Updates
 * **BIOS (Legacy) Support.**
 * **LUKS (Encryption) & LVM Support.**
-* **Full `fstab` Parsing:** For automatic detection and mounting of complex `/boot` and subvolume setups.
+* **Full `fstab` Parsing:** For automatic detection and mounting of complex setups without prompting the user.
 
 ## ⚠️ Disclaimer
-This tool is currently intended for **UEFI** systems. While V8 introduces robust safety checks, always verify the auto-detected partitions before confirming the repair process.
+This tool is currently intended for **UEFI** systems. Always verify the auto-detected partitions and subvolumes before confirming the repair process.
 
 ---
