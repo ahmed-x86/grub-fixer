@@ -10,12 +10,12 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V2: Added input validation (checks if partition exists) and loops for user input.
 # V3: Added /mnt cleanup (umount -R) before starting to prevent mount conflicts.
 # V4: Added 'set -e' for safety, forced Root partition input, OS detection.
-# V5: Added '--removable' to grub-install to fix VM/NVRAM EFI variable issues.
-#     Redirected 'read' from /dev/tty to fully support 'curl | bash' pipes.
+# V5: Added '--removable' to fix VM/NVRAM issues, and TTY Pipeline support.
 # V6: Added Auto-Detection using lsblk FSTYPE without mounting.
 # V7: Added dynamic support for mounting custom volumes (e.g., /home, /var).
 # V8: Added Root Validation, System Logging, and Smart EFI Detection.
-# FUTURE: Support for BIOS (Legacy), LUKS, LVM, and full fstab parsing.
+# V9: Added dynamic Btrfs subvolumes support with smart routing.
+# FUTURE: Support for BIOS (Legacy), LUKS, and full fstab parsing.
 # ==============================================================================
 
 # --- 1. ROOT VALIDATION ---
@@ -31,7 +31,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V8: Smart Detection & Logging"
+echo "GRUB Fixer V9: Btrfs & Smart Detection"
 echo "Date: $(date)"
 echo "Currently supports x86_64-efi only."
 echo "=========================================="
@@ -105,7 +105,7 @@ if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
     boot_ans="n" # We assume no separate /boot if they accepted this basic layout
     
 else
-    # --- FALLBACK: V5 MANUAL INPUT ---
+    # --- FALLBACK: MANUAL INPUT ---
     echo "[-] Falling back to Manual Input..."
     echo ""
     
@@ -145,14 +145,14 @@ else
     fi
 fi
 
-# --- CUSTOM VOLUMES LOGIC ---
+# --- CUSTOM VOLUMES LOGIC (Non-Btrfs external partitions) ---
 declare -a custom_parts
 declare -a custom_mounts
 
 echo ""
 echo "[*] Custom Volumes (Optional)"
 while true; do
-    read -p "Do you want to mount any other partitions? (e.g., /home, /var, /usr) (y/n): " custom_ans </dev/tty
+    read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
     if [[ "$custom_ans" == "y" ]]; then
         read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
         if [ -b "/dev/$c_part" ]; then
@@ -182,20 +182,68 @@ if grep -qs ' /mnt' /proc/mounts; then
     sudo umount -R /mnt 2>/dev/null || true
 fi
 
-# 5. Execute mount commands in the correct order (Root first)
-sudo mount /dev/$root_part /mnt
+# --- 5. BTRFS & ROOT MOUNT LOGIC ---
+ROOT_FSTYPE=$(lsblk -n -o FSTYPE "/dev/$root_part" | head -n 1)
 
+if [ "$ROOT_FSTYPE" == "btrfs" ]; then
+    echo -e "\n[*] Btrfs Filesystem Detected on /dev/$root_part!"
+    echo "[i] Please enter your subvolumes and their mount points (separated by a space)."
+    echo "    Examples:  @ /"
+    echo "               @home /home"
+    echo "               @log /var/log"
+    echo ""
+    
+    while true; do
+        read -p "-> Enter subvolume and mount point: " subvol mnt_point </dev/tty
+        
+        # Validate input
+        if [ -z "$subvol" ] || [ -z "$mnt_point" ]; then
+            echo "[-] Error: You must enter BOTH the subvolume and the mount point. Try again."
+            continue
+        fi
+        
+        # Smart routing: If mount point is exactly '/', it goes to '/mnt'
+        if [ "$mnt_point" == "/" ]; then
+            TARGET_MNT="/mnt"
+        else
+            # Ensure custom mount points start with '/'
+            if [[ "$mnt_point" != /* ]]; then
+                mnt_point="/$mnt_point"
+            fi
+            TARGET_MNT="/mnt$mnt_point"
+        fi
+        
+        echo "   [+] Mounting subvolume '$subvol' to '$TARGET_MNT'..."
+        sudo mkdir -p "$TARGET_MNT"
+        sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
+        
+        # Ask if there are more subvolumes
+        read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
+        if [ "$more_btrfs" != "y" ]; then
+            break
+        fi
+    done
+else
+    # Standard mount for ext4, xfs, etc.
+    echo "-> Mounting Standard Root Partition (/dev/$root_part)..."
+    sudo mount "/dev/$root_part" /mnt
+fi
+
+# Mount Boot if separated
 if [ "$boot_ans" == "y" ]; then
+    echo "-> Mounting Boot Partition (/dev/$boot_part)..."
     sudo mkdir -p /mnt/boot
     sudo mount /dev/$boot_part /mnt/boot
 fi
 
+# Mount EFI
 if [ "$efi_ans" == "y" ]; then
+    echo "-> Mounting EFI Partition (/dev/$efi_part)..."
     sudo mkdir -p /mnt/boot/efi
     sudo mount /dev/$efi_part /mnt/boot/efi
 fi
 
-# 5.5 Mount custom partitions
+# Mount Custom Partitions
 if [ ${#custom_parts[@]} -gt 0 ]; then
     echo "-> Mounting custom volumes..."
     for i in "${!custom_parts[@]}"; do
