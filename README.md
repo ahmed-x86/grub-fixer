@@ -8,7 +8,7 @@ An automated, failsafe Bash script designed to repair the GRUB bootloader on UEF
 Run the following command directly from your terminal in any Live Linux environment (Arch, EndeavourOS, etc.):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/refs/heads/main/grub-fixer.sh | bash
+bash -c "$(curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/refs/heads/main/grub-fixer.sh)"
 ```
 
 ## ✨ New in V4
