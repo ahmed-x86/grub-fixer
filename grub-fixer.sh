@@ -16,7 +16,8 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V8: Added Root Validation, System Logging, and Smart EFI Detection.
 # V9: Added dynamic Btrfs subvolumes support with smart routing.
 # V10: Bulletproof Btrfs loop (forced y/n), fixed Archinstall /boot vs /boot/efi trap.
-# FUTURE: Support for BIOS (Legacy), LUKS, and full fstab parsing.
+# V11: Zero-Interaction Mode (fstab parser), 3-Tier Fallback System.
+# FUTURE: Support for BIOS (Legacy) and LUKS.
 # ==============================================================================
 
 # --- 1. ROOT VALIDATION ---
@@ -32,7 +33,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V10: Btrfs & Smart Detection"
+echo "GRUB Fixer V11: Ultimate Automation & FSTAB"
 echo "Date: $(date)"
 echo "Currently supports x86_64-efi only."
 echo "=========================================="
@@ -44,240 +45,421 @@ lsblk
 echo "========================"
 echo ""
 
-echo "[*] Scanning partitions for Smart Auto-Detection..."
+# Cleanup any previous scan mounts safely
+if grep -qs ' /tmp/grub-fixer-scan' /proc/mounts; then
+    sudo umount -R /tmp/grub-fixer-scan 2>/dev/null || true
+fi
 
-# --- 4. SMART AUTO DETECTION LOGIC ---
+# ==============================================================================
+# TIER 1: PRO FSTAB AUTO-DETECTION (V11)
+# ==============================================================================
+echo "[*] TIER 1: Initializing Deep Scan for fstab..."
 
-# Smart Detect EFI Partition: Mount vfat partitions temporarily to check for /EFI directory
-AUTO_EFI=""
-TMP_EFI_MNT="/tmp/grub-fixer-efi-check"
-mkdir -p "$TMP_EFI_MNT"
+SCAN_MNT="/tmp/grub-fixer-scan"
+mkdir -p "$SCAN_MNT"
+FSTAB_FOUND=0
 
-for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}'); do
-    # Try mounting read-only silently
-    if mount -o ro /dev/$part "$TMP_EFI_MNT" 2>/dev/null; then
-        if [ -d "$TMP_EFI_MNT/EFI" ]; then
-            AUTO_EFI="$part"
+# 1. Try finding Btrfs Root (@ or @root)
+for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="btrfs" {print $1}'); do
+    # Try @ (Arch, Ubuntu)
+    if mount -o ro,subvol=@ "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
+        umount "$SCAN_MNT" 2>/dev/null || true
+    fi
+    # Try @root (Fedora, openSUSE)
+    if mount -o ro,subvol=@root "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
+        umount "$SCAN_MNT" 2>/dev/null || true
+    fi
+    # Try flat Btrfs (no subvol)
+    if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
+        umount "$SCAN_MNT" 2>/dev/null || true
+    fi
+done
+
+# 2. If no Btrfs, try ext4/xfs sorted by size (largest first)
+if [ $FSTAB_FOUND -eq 0 ]; then
+    for part in $(lsblk -l -b -o NAME,FSTYPE,SIZE | awk '$2~/(ext4|xfs)/ {print $0}' | sort -k3 -nr | awk '{print $1}'); do
+        if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
+            umount "$SCAN_MNT" 2>/dev/null || true
+        fi
+    done
+fi
+
+PRO_MODE_ACCEPTED=0
+
+if [ $FSTAB_FOUND -eq 1 ]; then
+    echo "[+] Found /etc/fstab! Parsing system layout..."
+    
+    declare -a FSTAB_DEVS
+    declare -a FSTAB_MNTS
+    declare -a FSTAB_TYPES
+    declare -a FSTAB_OPTS
+
+    echo ""
+    echo "=== TIER 1: Pro System Layout (From fstab) ==="
+    
+    while read -r dev mnt type opts dump pass; do
+        # Skip comments, empty lines, and irrelevant filesystems
+        [[ "$dev" =~ ^#.* ]] && continue
+        [[ -z "$dev" ]] && continue
+        [[ "$type" =~ ^(swap|tmpfs|proc|sysfs|devtmpfs|devpts|efivarfs|cdrom)$ ]] && continue
+        [[ "$mnt" == "none" ]] && continue
+
+        real_dev="$dev"
+        # Resolve UUIDs
+        if [[ "$dev" == UUID=* ]]; then
+            uuid_val="${dev#UUID=}"
+            uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+            found_dev=$(blkid -U "$uuid_val" 2>/dev/null)
+            [ -n "$found_dev" ] && real_dev="$found_dev"
+        # Resolve PARTUUIDs
+        elif [[ "$dev" == PARTUUID=* ]]; then
+             uuid_val="${dev#PARTUUID=}"
+             uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+             found_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
+             [ -n "$found_dev" ] && real_dev="$found_dev"
+        fi
+
+        FSTAB_DEVS+=("$real_dev")
+        FSTAB_MNTS+=("$mnt")
+        FSTAB_TYPES+=("$type")
+        FSTAB_OPTS+=("$opts")
+        
+        if [[ "$type" == "btrfs" ]]; then
+            subvol_info=$(echo "$opts" | grep -o 'subvol=[^,]*' || true)
+            echo "  -> Mount: $mnt | Device: $real_dev ($type, $subvol_info)"
+        else
+            echo "  -> Mount: $mnt | Device: $real_dev ($type)"
+        fi
+    done < "$SCAN_MNT/etc/fstab"
+    echo "=============================================="
+    
+    umount "$SCAN_MNT" 2>/dev/null || true
+    rm -rf "$SCAN_MNT"
+
+    read -p "Is this fstab configuration 100% correct? (y/n): " pro_ans </dev/tty
+    if [[ "$pro_ans" == "y" || "$pro_ans" == "Y" ]]; then
+        PRO_MODE_ACCEPTED=1
+    else
+        echo "[-] Pro Mode rejected by user. Falling back to V10 Logic..."
+    fi
+else
+    echo "[-] fstab not found or couldn't be parsed. Falling back to V10 Logic..."
+    umount "$SCAN_MNT" 2>/dev/null || true
+    rm -rf "$SCAN_MNT"
+fi
+
+# ==============================================================================
+# EXECUTION: TIER 1 (PRO FSTAB)
+# ==============================================================================
+if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
+    echo -e "\n[*] Executing Automated FSTAB Mounts..."
+    
+    if grep -qs ' /mnt' /proc/mounts; then sudo umount -R /mnt 2>/dev/null || true; fi
+    
+    # Mount Root (/) first
+    root_idx=-1
+    for i in "${!FSTAB_MNTS[@]}"; do
+        if [ "${FSTAB_MNTS[$i]}" == "/" ]; then root_idx=$i; break; fi
+    done
+    
+    if [ $root_idx -ne -1 ]; then
+        r_dev="${FSTAB_DEVS[$root_idx]}"
+        r_opts="${FSTAB_OPTS[$root_idx]}"
+        r_type="${FSTAB_TYPES[$root_idx]}"
+        
+        echo "   [+] Mounting Root (/) -> $r_dev"
+        if [[ "$r_type" == "btrfs" ]]; then
+            r_subvol=$(echo "$r_opts" | grep -o 'subvol=[^,]*' | cut -d= -f2 || true)
+            sudo mount -o subvol="$r_subvol" "$r_dev" /mnt
+        else
+            sudo mount "$r_dev" /mnt
+        fi
+    else
+        echo "[-] CRITICAL ERROR: Could not find '/' in fstab! Falling back to manual mode..."
+        PRO_MODE_ACCEPTED=0 # Force fallback to TIER 2/3
+    fi
+    
+    # Mount everything else if root succeeded
+    if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
+        for i in "${!FSTAB_MNTS[@]}"; do
+            if [ $i -eq $root_idx ]; then continue; fi
+            c_dev="${FSTAB_DEVS[$i]}"
+            c_mnt="${FSTAB_MNTS[$i]}"
+            c_opts="${FSTAB_OPTS[$i]}"
+            c_type="${FSTAB_TYPES[$i]}"
+            
+            if [ ! -b "$c_dev" ]; then
+                echo "   [!] Warning: Device $c_dev not found. Skipping $c_mnt..."
+                continue
+            fi
+            
+            echo "   [+] Mounting $c_mnt -> $c_dev"
+            sudo mkdir -p "/mnt$c_mnt"
+            if [[ "$c_type" == "btrfs" ]]; then
+                c_subvol=$(echo "$c_opts" | grep -o 'subvol=[^,]*' | cut -d= -f2 || true)
+                sudo mount -o subvol="$c_subvol" "$c_dev" "/mnt$c_mnt"
+            else
+                sudo mount "$c_dev" "/mnt$c_mnt"
+            fi
+        done
+        
+        # Determine EFI path for GRUB install (Default fallback if not found in fstab)
+        efi_mount_path="/boot/efi" 
+        for i in "${!FSTAB_MNTS[@]}"; do
+            if [[ "${FSTAB_TYPES[$i]}" == "vfat" && ("${FSTAB_MNTS[$i]}" == "/boot" || "${FSTAB_MNTS[$i]}" == "/boot/efi") ]]; then
+                efi_mount_path="${FSTAB_MNTS[$i]}"
+                break
+            fi
+        done
+    fi
+fi
+
+# ==============================================================================
+# TIER 2 & 3: FALLBACK TO V10 LOGIC (Auto-Detect / Manual)
+# ==============================================================================
+if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
+    echo -e "\n[*] Scanning partitions for Smart Auto-Detection..."
+
+    # --- 4. SMART AUTO DETECTION LOGIC ---
+
+    # Smart Detect EFI Partition: Mount vfat partitions temporarily to check for /EFI directory
+    AUTO_EFI=""
+    TMP_EFI_MNT="/tmp/grub-fixer-efi-check"
+    mkdir -p "$TMP_EFI_MNT"
+
+    for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}'); do
+        # Try mounting read-only silently
+        if mount -o ro /dev/$part "$TMP_EFI_MNT" 2>/dev/null; then
+            if [ -d "$TMP_EFI_MNT/EFI" ]; then
+                AUTO_EFI="$part"
+                umount "$TMP_EFI_MNT" 2>/dev/null || true
+                break # Found the real EFI partition, stop searching
+            fi
             umount "$TMP_EFI_MNT" 2>/dev/null || true
-            break # Found the real EFI partition, stop searching
         fi
-        umount "$TMP_EFI_MNT" 2>/dev/null || true
+    done
+    rm -rf "$TMP_EFI_MNT"
+
+    # Detect Linux Root Candidates (ext4, btrfs, xfs) - Pick the first one as a suggestion
+    AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
+    SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
+
+    # --- UX PROPOSAL ---
+    echo ""
+    echo "=== Auto-Detection Proposal ==="
+    if [ -n "$SUGGESTED_ROOT" ]; then
+        echo "  Root (/)        : /dev/$SUGGESTED_ROOT"
+    else
+        echo "  Root (/)        : [NOT FOUND]"
     fi
-done
-rm -rf "$TMP_EFI_MNT"
 
-# Detect Linux Root Candidates (ext4, btrfs, xfs) - Pick the first one as a suggestion
-AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
-SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
-
-# --- UX PROPOSAL ---
-echo ""
-echo "=== Auto-Detection Proposal ==="
-if [ -n "$SUGGESTED_ROOT" ]; then
-    echo "  Root (/)        : /dev/$SUGGESTED_ROOT"
-else
-    echo "  Root (/)        : [NOT FOUND]"
-fi
-
-if [ -n "$AUTO_EFI" ]; then
-    echo "  EFI Partition   : /dev/$AUTO_EFI (Verified /EFI directory)"
-else
-    echo "  EFI Partition   : [NOT FOUND]"
-fi
-echo "  Boot (/boot)    : [No separate partition assumed]"
-echo "==============================="
-echo ""
-
-# Ask the user based on your idea
-read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
-
-if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
-    # --- ACCEPTED AUTO-DETECTION ---
-    echo "[+] Proceeding with Auto-Detected partitions..."
-    root_part="$SUGGESTED_ROOT"
-    
     if [ -n "$AUTO_EFI" ]; then
-        efi_ans="y"
-        efi_part="$AUTO_EFI"
+        echo "  EFI Partition   : /dev/$AUTO_EFI (Verified /EFI directory)"
+    else
+        echo "  EFI Partition   : [NOT FOUND]"
+    fi
+    echo "  Boot (/boot)    : [No separate partition assumed]"
+    echo "==============================="
+    echo ""
+
+    # Ask the user based on your idea
+    read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
+
+    if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
+        # --- ACCEPTED AUTO-DETECTION ---
+        echo "[+] Proceeding with Auto-Detected partitions..."
+        root_part="$SUGGESTED_ROOT"
         
-        # [V10 Fix]: Ask where to mount EFI to catch Archinstall /boot logic
+        if [ -n "$AUTO_EFI" ]; then
+            efi_ans="y"
+            efi_part="$AUTO_EFI"
+            
+            # [V10 Fix]: Ask where to mount EFI to catch Archinstall /boot logic
+            echo ""
+            echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
+            echo "    (If you used archinstall, it is usually /boot)"
+            read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
+            efi_mount_path=${efi_mount_path:-/boot}
+        else
+            efi_ans="n"
+        fi
+        
+        boot_ans="n" # We assume no separate /boot if they accepted this basic layout
+        
+    else
+        # --- FALLBACK: MANUAL INPUT ---
+        echo "[-] Falling back to Manual Input..."
         echo ""
-        echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
-        echo "    (If you used archinstall, it is usually /boot)"
-        read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
-        efi_mount_path=${efi_mount_path:-/boot}
-    else
-        efi_ans="n"
+        
+        # Root partition is REQUIRED
+        echo "[*] Root partition is REQUIRED to repair the system."
+        while true; do
+            read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
+            if [ -b "/dev/$root_part" ]; then
+                break
+            else
+                echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
+            fi
+        done
+
+        read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
+        if [ "$efi_ans" == "y" ]; then
+            while true; do
+                read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
+                if [ -b "/dev/$efi_part" ]; then
+                    # [V10 Fix]: Ask where to mount EFI in manual mode too
+                    read -p "-> Where should it be mounted? (e.g., /boot or /boot/efi) [default: /boot/efi]: " efi_mount_path </dev/tty
+                    efi_mount_path=${efi_mount_path:-/boot/efi}
+                    break 
+                else
+                    echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
+                fi
+            done
+        fi
+
+        read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
+        if [ "$boot_ans" == "y" ]; then
+            while true; do
+                read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
+                if [ -b "/dev/$boot_part" ]; then
+                    break
+                else
+                    echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
+                fi
+            done
+        fi
     fi
-    
-    boot_ans="n" # We assume no separate /boot if they accepted this basic layout
-    
-else
-    # --- FALLBACK: MANUAL INPUT ---
-    echo "[-] Falling back to Manual Input..."
+
+    # --- CUSTOM VOLUMES LOGIC (Non-Btrfs external partitions) ---
+    declare -a custom_parts
+    declare -a custom_mounts
+
     echo ""
-    
-    # Root partition is REQUIRED
-    echo "[*] Root partition is REQUIRED to repair the system."
+    echo "[*] Custom Volumes (Optional)"
     while true; do
-        read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
-        if [ -b "/dev/$root_part" ]; then
-            break
+        read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
+        if [[ "$custom_ans" == "y" ]]; then
+            read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
+            if [ -b "/dev/$c_part" ]; then
+                read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
+                
+                # Ensure the mount point starts with /
+                if [[ "$c_mount" == /* ]]; then
+                    custom_parts+=("$c_part")
+                    custom_mounts+=("$c_mount")
+                    echo "  [+] Added: /dev/$c_part will be mounted at /mnt$c_mount"
+                else
+                    echo "  [-] Error: Mount point must start with '/' (e.g., /var). Try again."
+                fi
+            else
+                echo "  [-] Error: Partition '/dev/$c_part' does not exist. Try again."
+            fi
         else
-            echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
+            break
         fi
     done
 
-    read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
-    if [ "$efi_ans" == "y" ]; then
-        while true; do
-            read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
-            if [ -b "/dev/$efi_part" ]; then
-                # [V10 Fix]: Ask where to mount EFI in manual mode too
-                read -p "-> Where should it be mounted? (e.g., /boot or /boot/efi) [default: /boot/efi]: " efi_mount_path </dev/tty
-                efi_mount_path=${efi_mount_path:-/boot/efi}
-                break 
-            else
-                echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
-            fi
-        done
+    echo -e "\n[*] Executing Mount commands..."
+
+    # Clean up existing mounts safely
+    if grep -qs ' /mnt' /proc/mounts; then
+        echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
+        sudo umount -R /mnt 2>/dev/null || true
     fi
 
-    read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
+    # --- 5. BTRFS & ROOT MOUNT LOGIC ---
+    ROOT_FSTYPE=$(lsblk -n -o FSTYPE "/dev/$root_part" | head -n 1)
+
+    if [ "$ROOT_FSTYPE" == "btrfs" ]; then
+        echo -e "\n[*] Btrfs Filesystem Detected on /dev/$root_part!"
+        echo "[i] Please enter your subvolumes and their mount points (separated by a space)."
+        echo "    Examples:  @ /"
+        echo "               @home /home"
+        echo "               @log /var/log"
+        echo ""
+        
+        while true; do
+            read -p "-> Enter subvolume and mount point: " subvol mnt_point </dev/tty
+            
+            # Validate input
+            if [ -z "$subvol" ] || [ -z "$mnt_point" ]; then
+                echo "[-] Error: You must enter BOTH the subvolume and the mount point. Try again."
+                continue
+            fi
+            
+            # Smart routing: If mount point is exactly '/', it goes to '/mnt'
+            if [ "$mnt_point" == "/" ]; then
+                TARGET_MNT="/mnt"
+            else
+                # Ensure custom mount points start with '/'
+                if [[ "$mnt_point" != /* ]]; then
+                    mnt_point="/$mnt_point"
+                fi
+                TARGET_MNT="/mnt$mnt_point"
+            fi
+            
+            echo "   [+] Mounting subvolume '$subvol' to '$TARGET_MNT'..."
+            sudo mkdir -p "$TARGET_MNT"
+            sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
+            
+            # Ask if there are more subvolumes - [V10 Fix]: Bulletproof loop
+            while true; do
+                read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
+                more_btrfs=$(echo "$more_btrfs" | tr '[:upper:]' '[:lower:]')
+                
+                if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then
+                    break
+                else
+                    echo "   [-] Invalid input. Please type 'y' for YES or 'n' for NO."
+                fi
+            done
+            
+            if [ "$more_btrfs" == "n" ]; then
+                break
+            fi
+        done
+    else
+        # Standard mount for ext4, xfs, etc.
+        echo "-> Mounting Standard Root Partition (/dev/$root_part)..."
+        sudo mount "/dev/$root_part" /mnt
+    fi
+
+    # Mount Boot if separated
     if [ "$boot_ans" == "y" ]; then
-        while true; do
-            read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
-            if [ -b "/dev/$boot_part" ]; then
-                break
-            else
-                echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
-            fi
+        echo "-> Mounting Boot Partition (/dev/$boot_part)..."
+        sudo mkdir -p /mnt/boot
+        sudo mount /dev/$boot_part /mnt/boot
+    fi
+
+    # Mount EFI (Dynamic path based on user input for V10)
+    if [ "$efi_ans" == "y" ]; then
+        echo "-> Mounting EFI Partition (/dev/$efi_part) to /mnt$efi_mount_path..."
+        sudo mkdir -p "/mnt$efi_mount_path"
+        sudo mount /dev/$efi_part "/mnt$efi_mount_path"
+    fi
+
+    # Mount Custom Partitions
+    if [ ${#custom_parts[@]} -gt 0 ]; then
+        echo "-> Mounting custom volumes..."
+        for i in "${!custom_parts[@]}"; do
+            c_part="${custom_parts[$i]}"
+            c_mount="${custom_mounts[$i]}"
+            
+            sudo mkdir -p "/mnt$c_mount"
+            sudo mount "/dev/$c_part" "/mnt$c_mount"
+            echo "   Mounted /dev/$c_part to /mnt$c_mount"
         done
     fi
-fi
+fi # End of Tier 2 & 3 Fallback execution
 
-# --- CUSTOM VOLUMES LOGIC (Non-Btrfs external partitions) ---
-declare -a custom_parts
-declare -a custom_mounts
-
-echo ""
-echo "[*] Custom Volumes (Optional)"
-while true; do
-    read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
-    if [[ "$custom_ans" == "y" ]]; then
-        read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
-        if [ -b "/dev/$c_part" ]; then
-            read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
-            
-            # Ensure the mount point starts with /
-            if [[ "$c_mount" == /* ]]; then
-                custom_parts+=("$c_part")
-                custom_mounts+=("$c_mount")
-                echo "  [+] Added: /dev/$c_part will be mounted at /mnt$c_mount"
-            else
-                echo "  [-] Error: Mount point must start with '/' (e.g., /var). Try again."
-            fi
-        else
-            echo "  [-] Error: Partition '/dev/$c_part' does not exist. Try again."
-        fi
-    else
-        break
-    fi
-done
-
-echo -e "\n[*] Executing Mount commands..."
-
-# Clean up existing mounts safely
-if grep -qs ' /mnt' /proc/mounts; then
-    echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
-    sudo umount -R /mnt 2>/dev/null || true
-fi
-
-# --- 5. BTRFS & ROOT MOUNT LOGIC ---
-ROOT_FSTYPE=$(lsblk -n -o FSTYPE "/dev/$root_part" | head -n 1)
-
-if [ "$ROOT_FSTYPE" == "btrfs" ]; then
-    echo -e "\n[*] Btrfs Filesystem Detected on /dev/$root_part!"
-    echo "[i] Please enter your subvolumes and their mount points (separated by a space)."
-    echo "    Examples:  @ /"
-    echo "               @home /home"
-    echo "               @log /var/log"
-    echo ""
-    
-    while true; do
-        read -p "-> Enter subvolume and mount point: " subvol mnt_point </dev/tty
-        
-        # Validate input
-        if [ -z "$subvol" ] || [ -z "$mnt_point" ]; then
-            echo "[-] Error: You must enter BOTH the subvolume and the mount point. Try again."
-            continue
-        fi
-        
-        # Smart routing: If mount point is exactly '/', it goes to '/mnt'
-        if [ "$mnt_point" == "/" ]; then
-            TARGET_MNT="/mnt"
-        else
-            # Ensure custom mount points start with '/'
-            if [[ "$mnt_point" != /* ]]; then
-                mnt_point="/$mnt_point"
-            fi
-            TARGET_MNT="/mnt$mnt_point"
-        fi
-        
-        echo "   [+] Mounting subvolume '$subvol' to '$TARGET_MNT'..."
-        sudo mkdir -p "$TARGET_MNT"
-        sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
-        
-        # Ask if there are more subvolumes - [V10 Fix]: Bulletproof loop
-        while true; do
-            read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
-            more_btrfs=$(echo "$more_btrfs" | tr '[:upper:]' '[:lower:]')
-            
-            if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then
-                break
-            else
-                echo "   [-] Invalid input. Please type 'y' for YES or 'n' for NO."
-            fi
-        done
-        
-        if [ "$more_btrfs" == "n" ]; then
-            break
-        fi
-    done
-else
-    # Standard mount for ext4, xfs, etc.
-    echo "-> Mounting Standard Root Partition (/dev/$root_part)..."
-    sudo mount "/dev/$root_part" /mnt
-fi
-
-# Mount Boot if separated
-if [ "$boot_ans" == "y" ]; then
-    echo "-> Mounting Boot Partition (/dev/$boot_part)..."
-    sudo mkdir -p /mnt/boot
-    sudo mount /dev/$boot_part /mnt/boot
-fi
-
-# Mount EFI (Dynamic path based on user input for V10)
-if [ "$efi_ans" == "y" ]; then
-    echo "-> Mounting EFI Partition (/dev/$efi_part) to /mnt$efi_mount_path..."
-    sudo mkdir -p "/mnt$efi_mount_path"
-    sudo mount /dev/$efi_part "/mnt$efi_mount_path"
-fi
-
-# Mount Custom Partitions
-if [ ${#custom_parts[@]} -gt 0 ]; then
-    echo "-> Mounting custom volumes..."
-    for i in "${!custom_parts[@]}"; do
-        c_part="${custom_parts[$i]}"
-        c_mount="${custom_mounts[$i]}"
-        
-        sudo mkdir -p "/mnt$c_mount"
-        sudo mount "/dev/$c_part" "/mnt$c_mount"
-        echo "   Mounted /dev/$c_part to /mnt$c_mount"
-    done
-fi
-
-echo "[*] Preparing the chroot environment..."
+# ==============================================================================
+# FINAL STAGE: CHROOT & GRUB REPAIR (Universal for all Tiers)
+# ==============================================================================
+echo -e "\n[*] Preparing the chroot environment..."
 
 # 6. Preparations and bind mounts
 sudo mount --bind /dev /mnt/dev
@@ -313,7 +495,7 @@ EOF
 
 # 9. Unmount and print success message
 echo -e "\n[*] Unmounting filesystems..."
-sudo umount -R /mnt
+sudo umount -R /mnt || true
 
 echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully."
 echo "[i] A full log of this operation has been saved to: $LOG_FILE"
