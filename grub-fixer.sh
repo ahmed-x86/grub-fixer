@@ -1,14 +1,15 @@
 #!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
 
 # ==============================================================================
-# GRUB Fixer - V3
+# GRUB Fixer - V4
 # Currently supports x86_64-efi only.
 # Support for other architectures and BIOS (Legacy) will be added in future updates.
-# Support for LUKS and lvm  will be added in future updates
+# Support for LUKS and LVM will be added in future updates.
 # ==============================================================================
-echo "GRUB Fixer - V3"
+echo "GRUB Fixer - V4"
 echo "Currently supports x86_64-efi only."
-echo "Support for LUKS and lvm  will be added in future updates"
+echo "Support for LUKS and LVM will be added in future updates"
 echo ""
 
 # 1. Show available disks
@@ -18,6 +19,18 @@ echo "========================"
 echo ""
 
 # 2. Ask the user and store answers (with Validation)
+
+# Root partition is REQUIRED
+echo "[*] Root partition is REQUIRED to repair the system."
+while true; do
+    read -p "What is the Root (/) partition name? (e.g., vda3): " root_part
+    if [ -b "/dev/$root_part" ]; then
+        break
+    else
+        echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
+    fi
+done
+
 read -p "Did you create a /boot/efi partition? (y/n): " efi_ans
 if [ "$efi_ans" == "y" ]; then
     while true; do
@@ -30,7 +43,7 @@ if [ "$efi_ans" == "y" ]; then
     done
 fi
 
-read -p "Did you create a /boot partition? (y/n): " boot_ans
+read -p "Did you create a separate /boot partition? (y/n): " boot_ans
 if [ "$boot_ans" == "y" ]; then
     while true; do
         read -p "What is the partition name? (e.g., vda2): " boot_part
@@ -42,31 +55,16 @@ if [ "$boot_ans" == "y" ]; then
     done
 fi
 
-read -p "Did you create a root directory (/) partition? (y/n): " root_ans
-if [ "$root_ans" == "y" ]; then
-    while true; do
-        read -p "What is the partition name? (e.g., vda3): " root_part
-        if [ -b "/dev/$root_part" ]; then
-            break
-        else
-            echo "[-] Error: Partition '/dev/$root_part' does not exist. Please try again."
-        fi
-    done
-fi
-
 echo -e "\n[*] Executing Mount commands..."
 
-
+# Clean up existing mounts (the 'if' statement safely catches the exit code of grep, so set -e won't kill the script here)
 if grep -qs ' /mnt' /proc/mounts; then
     echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
     sudo umount -R /mnt 2>/dev/null
 fi
-# ---------------------------
 
 # 3. Execute mount commands in the correct order (Root first)
-if [ "$root_ans" == "y" ]; then
-    sudo mount /dev/$root_part /mnt
-fi
+sudo mount /dev/$root_part /mnt
 
 if [ "$boot_ans" == "y" ]; then
     sudo mkdir -p /mnt/boot
@@ -86,14 +84,22 @@ sudo mount --bind /proc /mnt/proc
 sudo mount --bind /sys /mnt/sys
 sudo mount --bind /run /mnt/run
 
-# 5. Read the distribution name from the broken system
-source /mnt/etc/os-release
-OS_NAME=$NAME
+# 5. Read the distribution name safely
+if [ -f "/mnt/etc/os-release" ]; then
+    source /mnt/etc/os-release
+    OS_NAME=$NAME
+else
+    echo "[-] Warning: /mnt/etc/os-release not found. Defaulting OS_NAME to 'Linux'."
+    OS_NAME="Linux"
+fi
 
 echo -e "\n[*] Entering chroot and repairing GRUB automatically..."
 
 # 6. Enter chroot and execute commands automatically using EOF
 sudo chroot /mnt /bin/bash <<EOF
+# Enable exit-on-error inside the chroot environment as well
+set -e
+
 echo "-> Installing for x86_64-efi platform..."
 grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id="$OS_NAME"
 
