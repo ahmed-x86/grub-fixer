@@ -17,7 +17,8 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V9: Added dynamic Btrfs subvolumes support with smart routing.
 # V10: Bulletproof Btrfs loop (forced y/n), fixed Archinstall /boot vs /boot/efi trap.
 # V11: Zero-Interaction Mode (fstab parser), 3-Tier Fallback System.
-# FUTURE: Support for BIOS (Legacy) and LUKS.
+# V12: Added Legacy BIOS (i386-pc) support, auto-detection, and Target Disk extraction.
+# FUTURE: Support for LUKS.
 # ==============================================================================
 
 # --- 1. ROOT VALIDATION ---
