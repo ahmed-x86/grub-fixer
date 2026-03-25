@@ -12,11 +12,11 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V4: Added 'set -e' for safety, forced Root partition input, OS detection.
 # V5: Added '--removable' to grub-install to fix VM/NVRAM EFI variable issues.
 #     Redirected 'read' from /dev/tty to fully support 'curl | bash' pipes.
-#
-# FUTURE: Support for BIOS (Legacy), LUKS, LVM, and Auto-detection.
+# V6: Added Auto-Detection using lsblk FSTYPE without mounting.
+# FUTURE: Support for BIOS (Legacy), LUKS, LVM, and full fstab parsing.
 # ==============================================================================
 
-echo "GRUB Fixer - V5 (Bulletproof Edition)"
+echo "V6: Added Auto-Detection using lsblk FSTYPE without mounting."
 echo "Currently supports x86_64-efi only."
 echo "Support for LUKS and LVM will be added in future updates"
 echo ""
@@ -27,47 +27,94 @@ lsblk
 echo "========================"
 echo ""
 
-# 2. Ask the user and store answers (with Validation)
-# Notice the </dev/tty which forces read from terminal instead of stdin pipe
+echo "[*] Scanning partitions for Auto-Detection..."
 
-# Root partition is REQUIRED
-echo "[*] Root partition is REQUIRED to repair the system."
-while true; do
-    read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
-    if [ -b "/dev/$root_part" ]; then
-        break
-    else
-        echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
-    fi
-done
+# --- AUTO DETECTION LOGIC ---
+# Detect EFI Partition (vfat)
+AUTO_EFI=$(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}' | head -n 1)
+# Detect Linux Root Candidates (ext4, btrfs, xfs) - We will pick the first one as a suggestion
+AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
+SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
 
-read -p "Did you create a /boot/efi partition? (y/n): " efi_ans </dev/tty
-if [ "$efi_ans" == "y" ]; then
-    while true; do
-        read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
-        if [ -b "/dev/$efi_part" ]; then
-            break 
-        else
-            echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
-        fi
-    done
+# --- UX PROPOSAL ---
+echo ""
+echo "=== Auto-Detection Proposal ==="
+if [ -n "$SUGGESTED_ROOT" ]; then
+    echo "  Root (/)        : /dev/$SUGGESTED_ROOT"
+else
+    echo "  Root (/)        : [NOT FOUND]"
 fi
 
-read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
-if [ "$boot_ans" == "y" ]; then
+if [ -n "$AUTO_EFI" ]; then
+    echo "  EFI (/boot/efi) : /dev/$AUTO_EFI"
+else
+    echo "  EFI (/boot/efi) : [NOT FOUND]"
+fi
+echo "  Boot (/boot)    : [No separate partition assumed]"
+echo "==============================="
+echo ""
+
+# Ask the user based on your idea
+read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
+
+if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
+    # --- ACCEPTED AUTO-DETECTION ---
+    echo "[+] Proceeding with Auto-Detected partitions..."
+    root_part="$SUGGESTED_ROOT"
+    
+    if [ -n "$AUTO_EFI" ]; then
+        efi_ans="y"
+        efi_part="$AUTO_EFI"
+    else
+        efi_ans="n"
+    fi
+    
+    boot_ans="n" # We assume no separate /boot if they accepted this basic layout
+    
+else
+    # --- FALLBACK: V5 MANUAL INPUT (Your exact code) ---
+    echo "[-] Falling back to Manual Input..."
+    echo ""
+    
+    # Root partition is REQUIRED
+    echo "[*] Root partition is REQUIRED to repair the system."
     while true; do
-        read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
-        if [ -b "/dev/$boot_part" ]; then
+        read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
+        if [ -b "/dev/$root_part" ]; then
             break
         else
-            echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
+            echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
         fi
     done
+
+    read -p "Did you create a /boot/efi partition? (y/n): " efi_ans </dev/tty
+    if [ "$efi_ans" == "y" ]; then
+        while true; do
+            read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
+            if [ -b "/dev/$efi_part" ]; then
+                break 
+            else
+                echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
+            fi
+        done
+    fi
+
+    read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
+    if [ "$boot_ans" == "y" ]; then
+        while true; do
+            read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
+            if [ -b "/dev/$boot_part" ]; then
+                break
+            else
+                echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
+            fi
+        done
+    fi
 fi
 
 echo -e "\n[*] Executing Mount commands..."
 
-# Clean up existing mounts (the 'if' statement safely catches the exit code of grep)
+# Clean up existing mounts safely
 if grep -qs ' /mnt' /proc/mounts; then
     echo "-> Found existing mounts on /mnt. Cleaning up before proceeding..."
     sudo umount -R /mnt 2>/dev/null || true
@@ -103,7 +150,7 @@ else
     OS_NAME="Linux"
 fi
 
-echo -e "\n[*] Entering chroot and repairing GRUB automatically..."
+echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
 
 # 6. Enter chroot and execute commands automatically using EOF
 sudo chroot /mnt /bin/bash <<EOF
