@@ -4,11 +4,11 @@
 # GRUB Fixer - V1
 # Currently supports x86_64-efi only.
 # Support for other architectures and BIOS (Legacy) will be added in future updates.
-# Support for LUKS and llvm  will be added in future updates
+# Support for LUKS and lvm  will be added in future updates
 # ==============================================================================
 echo "GRUB Fixer - V2"
 echo "Currently supports x86_64-efi only."
-echo "Support for LUKS and llvm  will be added in future updates"
+echo "Support for LUKS and lvm  will be added in future updates"
 echo ""
 
 # 1. Show available disks
