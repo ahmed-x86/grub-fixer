@@ -52,4 +52,3 @@ sudo ./grub-fixer.sh
 
 ## ⚠️ Disclaimer
 While highly automated, GRUB repair touches critical system files. Always verify the auto-detected partitions, `fstab` layout, and subvolumes before confirming the repair process, especially on dual-boot systems.
-```
