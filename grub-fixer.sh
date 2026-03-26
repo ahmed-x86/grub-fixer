@@ -22,10 +22,11 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V14: Added Execution Timer with dynamic human-like status messages.
 # V15: Added Universal UEFI Support (32-bit/i386-efi) with dynamic bitness detection.
 # V16: Added In-Situ (Local) Mode to repair GRUB directly from the running system without Live USB/chroot.
+# V17: Added Kernel cmdline detection for Live vs Real, and unified One-Click Confirmation prompt.
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
-# Start Timer for V14/V15/V16
+# Start Timer for V14/V15/V16/V17
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -41,7 +42,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V16: Ultimate Automation, Legacy BIOS, OS Prober, Universal UEFI & In-Situ Repair"
+echo "GRUB Fixer V17: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "=========================================="
@@ -59,21 +60,162 @@ if grep -qs ' /tmp/grub-fixer-scan' /proc/mounts; then
 fi
 
 # ==============================================================================
-# [V16] IN-SITU (LOCAL) MODE DETECTION
+# [V17] ENVIRONMENT DETECTION & UNIFIED PROMPT (Kernel Parameters + fstab)
 # ==============================================================================
-IS_LOCAL=0
-# Detect root filesystem type. Live USBs use overlay, iso9660, tmpfs, etc.
-CURRENT_ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "unknown")
+KERNEL_CMD=$(cat /proc/cmdline 2>/dev/null || echo "")
+IS_LIVE=0
+ENV_STR="Real Machine"
 
-if [[ ! "$CURRENT_ROOT_FS" =~ ^(overlay|iso9660|tmpfs|squashfs|unknown)$ ]]; then
-    echo -e "\n[*] IN-SITU (LOCAL) MODE DETECTED!"
-    echo "    Your root filesystem is '$CURRENT_ROOT_FS'. You appear to be running this script"
-    echo "    directly from your installed OS (e.g., booted via Super GRUB2 Disk) rather than a Live USB."
-    read -p "-> Do you want to repair GRUB locally WITHOUT chroot? (y/n): " local_ans </dev/tty
-    if [[ "$local_ans" == "y" || "$local_ans" == "Y" ]]; then
-        IS_LOCAL=1
+# V17 Intelligence: Read kernel parameters for 100% accurate environment detection
+if [[ "$KERNEL_CMD" =~ (archiso|casper|rd\.live\.image|live-media|boot=live|isofrom|miso|cdrom|toram) ]]; then
+    IS_LIVE=1
+    ENV_STR="Live Environment (USB/ISO)"
+fi
+
+echo -e "\n[*] V17 Smart Detection: Analyzed Kernel Parameters..."
+echo "[*] Initializing Deep Scan for system layout..."
+
+SCAN_MNT="/tmp/grub-fixer-scan"
+mkdir -p "$SCAN_MNT"
+FSTAB_FOUND=0
+FSTAB_PATH=""
+
+# Merge V11 intelligence (fstab parsing) at the beginning to form the unified prompt
+if [ $IS_LIVE -eq 0 ]; then
+    # If it's a real machine, read its files locally
+    if [ -f "/etc/fstab" ]; then
+        FSTAB_FOUND=1
+        FSTAB_PATH="/etc/fstab"
+    fi
+else
+    # 1. Try finding Btrfs Root (@ or @root)
+    for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="btrfs" {print $1}'); do
+        if mount -o ro,subvol=@ "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+            umount "$SCAN_MNT" 2>/dev/null || true
+        fi
+        if mount -o ro,subvol=@root "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+            umount "$SCAN_MNT" 2>/dev/null || true
+        fi
+        if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+            umount "$SCAN_MNT" 2>/dev/null || true
+        fi
+    done
+
+    # 2. If no Btrfs, try ext4/xfs sorted by size
+    if [ $FSTAB_FOUND -eq 0 ]; then
+        for part in $(lsblk -l -b -o NAME,FSTYPE,SIZE | awk '$2~/(ext4|xfs)/ {print $0}' | sort -k3 -nr | awk '{print $1}'); do
+            if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+                if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+                umount "$SCAN_MNT" 2>/dev/null || true
+            fi
+        done
     fi
 fi
+
+declare -a FSTAB_DEVS FSTAB_MNTS FSTAB_TYPES FSTAB_OPTS
+if [ $FSTAB_FOUND -eq 1 ]; then
+    echo -e "\n=== Detected System Layout (From fstab) ==="
+    while read -r dev mnt type opts dump pass; do
+        [[ "$dev" =~ ^#.* ]] && continue
+        [[ -z "$dev" ]] && continue
+        [[ "$type" =~ ^(swap|tmpfs|proc|sysfs|devtmpfs|devpts|efivarfs|cdrom)$ ]] && continue
+        [[ "$mnt" == "none" ]] && continue
+
+        real_dev="$dev"
+        if [[ "$dev" == UUID=* ]]; then
+            uuid_val="${dev#UUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+            found_dev=$(blkid -U "$uuid_val" 2>/dev/null)
+            [ -n "$found_dev" ] && real_dev="$found_dev"
+        elif [[ "$dev" == PARTUUID=* ]]; then
+             uuid_val="${dev#PARTUUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+             found_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
+             [ -n "$found_dev" ] && real_dev="$found_dev"
+        fi
+
+        FSTAB_DEVS+=("$real_dev")
+        FSTAB_MNTS+=("$mnt")
+        FSTAB_TYPES+=("$type")
+        FSTAB_OPTS+=("$opts")
+        
+        if [[ "$type" == "btrfs" ]]; then
+            subvol_info=$(echo "$opts" | grep -o 'subvol=[^,]*' || true)
+            echo "  -> Mount: $mnt | Device: $real_dev ($type, $subvol_info)"
+        else
+            echo "  -> Mount: $mnt | Device: $real_dev ($type)"
+        fi
+    done < "$FSTAB_PATH"
+    echo "==========================================="
+    
+    if [ "$FSTAB_PATH" == "$SCAN_MNT/etc/fstab" ]; then
+        umount "$SCAN_MNT" 2>/dev/null || true
+        rm -rf "$SCAN_MNT"
+    fi
+else
+    # V6/V10 Fallback Auto-Detection if fstab is completely missing
+    echo -e "\n=== Basic Auto-Detection Proposal ==="
+    AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
+    SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
+    if [ -n "$SUGGESTED_ROOT" ]; then echo "  Root (/)        : /dev/$SUGGESTED_ROOT"; else echo "  Root (/)        : [NOT FOUND]"; fi
+    echo "====================================="
+    if [ $IS_LIVE -eq 1 ]; then
+        umount "$SCAN_MNT" 2>/dev/null || true
+        rm -rf "$SCAN_MNT"
+    fi
+fi
+
+# --- V17 THE UNIFIED PROMPT ---
+echo ""
+read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
+
+# Variables routing based on Unified Prompt
+IS_LOCAL=0
+PRO_MODE_ACCEPTED=0
+V17_CONFIRM_ANS=""
+
+if [[ "$unified_ans" == "y" || "$unified_ans" == "Y" ]]; then
+    if [ $IS_LIVE -eq 0 ]; then
+        IS_LOCAL=1
+        PRO_MODE_ACCEPTED=0 # Because In-Situ executes immediately without fstab mounting
+    else
+        IS_LOCAL=0
+        if [ $FSTAB_FOUND -eq 1 ]; then
+            PRO_MODE_ACCEPTED=1 # Triggers Tier 1 execution
+        else
+            PRO_MODE_ACCEPTED=0
+            V17_CONFIRM_ANS="y" # Triggers Tier 2 execution silently
+        fi
+    fi
+else
+    echo "[-] You selected 'n'. System will ask for clarification..."
+    # Second question in case of rejection
+    read -p "-> Are you using a Live Environment (L) or a Real Machine (R)? (L/R): " env_ans </dev/tty
+    if [[ "$env_ans" == "L" || "$env_ans" == "l" ]]; then
+        IS_LIVE=1
+        IS_LOCAL=0
+        echo "[*] Proceeding as Live USB (Manual Partition Selection)..."
+    else
+        IS_LIVE=0
+        IS_LOCAL=1
+        echo "[*] Proceeding as Real Machine (Local Repair)..."
+    fi
+    PRO_MODE_ACCEPTED=0
+    V17_CONFIRM_ANS="n"
+fi
+
+
+# ==============================================================================
+# [V16] IN-SITU (LOCAL) MODE DETECTION & EXECUTION
+# ==============================================================================
+# [V17 Update: The IS_LOCAL variable is now smartly managed by the Unified Prompt above. 
+# The original V16 logic below is preserved but bypassed for user input.]
+# CURRENT_ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "unknown")
+# if [[ ! "$CURRENT_ROOT_FS" =~ ^(overlay|iso9660|tmpfs|squashfs|unknown)$ ]]; then
+#    echo -e "\n[*] IN-SITU (LOCAL) MODE DETECTED!"
+#    ...
+# fi
 
 if [ $IS_LOCAL -eq 1 ]; then
     echo -e "\n[*] Executing In-Situ (Local) GRUB Repair..."
@@ -172,105 +314,15 @@ root_part=""
 
 # ==============================================================================
 # TIER 1: PRO FSTAB AUTO-DETECTION (V11/V12)
+# [V17 Update: The fstab Deep Scan logic has been successfully moved to the 
+# top to feed the new Unified Prompt. The original code here is preserved 
+# in structure but bypassed for execution.]
 # ==============================================================================
-echo "[*] TIER 1: Initializing Deep Scan for fstab..."
-
-SCAN_MNT="/tmp/grub-fixer-scan"
-mkdir -p "$SCAN_MNT"
-FSTAB_FOUND=0
-
-# 1. Try finding Btrfs Root (@ or @root)
-for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="btrfs" {print $1}'); do
-    # Try @ (Arch, Ubuntu)
-    if mount -o ro,subvol=@ "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
-        umount "$SCAN_MNT" 2>/dev/null || true
-    fi
-    # Try @root (Fedora, openSUSE)
-    if mount -o ro,subvol=@root "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
-        umount "$SCAN_MNT" 2>/dev/null || true
-    fi
-    # Try flat Btrfs (no subvol)
-    if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
-        umount "$SCAN_MNT" 2>/dev/null || true
-    fi
-done
-
-# 2. If no Btrfs, try ext4/xfs sorted by size (largest first)
-if [ $FSTAB_FOUND -eq 0 ]; then
-    for part in $(lsblk -l -b -o NAME,FSTYPE,SIZE | awk '$2~/(ext4|xfs)/ {print $0}' | sort -k3 -nr | awk '{print $1}'); do
-        if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
-            umount "$SCAN_MNT" 2>/dev/null || true
-        fi
-    done
-fi
-
-PRO_MODE_ACCEPTED=0
-
-if [ $FSTAB_FOUND -eq 1 ]; then
-    echo "[+] Found /etc/fstab! Parsing system layout..."
-    
-    declare -a FSTAB_DEVS
-    declare -a FSTAB_MNTS
-    declare -a FSTAB_TYPES
-    declare -a FSTAB_OPTS
-
-    echo ""
-    echo "=== TIER 1: Pro System Layout (From fstab) ==="
-    
-    while read -r dev mnt type opts dump pass; do
-        # Skip comments, empty lines, and irrelevant filesystems
-        [[ "$dev" =~ ^#.* ]] && continue
-        [[ -z "$dev" ]] && continue
-        [[ "$type" =~ ^(swap|tmpfs|proc|sysfs|devtmpfs|devpts|efivarfs|cdrom)$ ]] && continue
-        [[ "$mnt" == "none" ]] && continue
-
-        real_dev="$dev"
-        # Resolve UUIDs
-        if [[ "$dev" == UUID=* ]]; then
-            uuid_val="${dev#UUID=}"
-            uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
-            found_dev=$(blkid -U "$uuid_val" 2>/dev/null)
-            [ -n "$found_dev" ] && real_dev="$found_dev"
-        # Resolve PARTUUIDs
-        elif [[ "$dev" == PARTUUID=* ]]; then
-             uuid_val="${dev#PARTUUID=}"
-             uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
-             found_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
-             [ -n "$found_dev" ] && real_dev="$found_dev"
-        fi
-
-        FSTAB_DEVS+=("$real_dev")
-        FSTAB_MNTS+=("$mnt")
-        FSTAB_TYPES+=("$type")
-        FSTAB_OPTS+=("$opts")
-        
-        if [[ "$type" == "btrfs" ]]; then
-            subvol_info=$(echo "$opts" | grep -o 'subvol=[^,]*' || true)
-            echo "  -> Mount: $mnt | Device: $real_dev ($type, $subvol_info)"
-        else
-            echo "  -> Mount: $mnt | Device: $real_dev ($type)"
-        fi
-    done < "$SCAN_MNT/etc/fstab"
-    echo "=============================================="
-    
-    umount "$SCAN_MNT" 2>/dev/null || true
-    rm -rf "$SCAN_MNT"
-
-    read -p "Is this fstab configuration 100% correct? (y/n): " pro_ans </dev/tty
-    if [[ "$pro_ans" == "y" || "$pro_ans" == "Y" ]]; then
-        PRO_MODE_ACCEPTED=1
-    else
-        echo "[-] Pro Mode rejected by user. Falling back to Auto-Detect Logic..."
-    fi
-else
-    echo "[-] fstab not found or couldn't be parsed. Falling back to Auto-Detect Logic..."
-    umount "$SCAN_MNT" 2>/dev/null || true
-    rm -rf "$SCAN_MNT"
-fi
+# echo "[*] TIER 1: Initializing Deep Scan for fstab..."
+# SCAN_MNT="/tmp/grub-fixer-scan"
+# ...
+# read -p "Is this fstab configuration 100% correct? (y/n): " pro_ans </dev/tty
+# ...
 
 # ==============================================================================
 # EXECUTION: TIER 1 (PRO FSTAB)
@@ -367,30 +419,18 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
     done
     rm -rf "$TMP_EFI_MNT"
 
-    # Detect Linux Root Candidates (ext4, btrfs, xfs) - Pick the first one as a suggestion
-    AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
-    SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
+    # [V17 Update: Redundant SUGGESTED_ROOT logic is safely bypassed here 
+    # since it was presented in the Unified Prompt.]
 
-    # --- UX PROPOSAL ---
-    echo ""
-    echo "=== Auto-Detection Proposal ==="
-    if [ -n "$SUGGESTED_ROOT" ]; then
-        echo "  Root (/)        : /dev/$SUGGESTED_ROOT"
+    # Ask the user based on your idea (V17: Only ask if they didn't already accept it)
+    if [ "$V17_CONFIRM_ANS" == "y" ]; then
+        confirm_ans="y"
+        echo "[+] Using accepted basic auto-detection..."
+    elif [ "$V17_CONFIRM_ANS" == "n" ]; then
+        confirm_ans="n"
     else
-        echo "  Root (/)        : [NOT FOUND]"
+        read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
     fi
-
-    if [ -n "$AUTO_EFI" ]; then
-        echo "  EFI Partition   : /dev/$AUTO_EFI (Verified /EFI directory)"
-    else
-        echo "  EFI Partition   : [NOT FOUND]"
-    fi
-    echo "  Boot (/boot)    : [No separate partition assumed]"
-    echo "==============================="
-    echo ""
-
-    # Ask the user based on your idea
-    read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
 
     if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
         # --- ACCEPTED AUTO-DETECTION ---
