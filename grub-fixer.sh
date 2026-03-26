@@ -21,10 +21,11 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V13: Added OS Prober support to automatically detect dual-boot systems (e.g., Windows).
 # V14: Added Execution Timer with dynamic human-like status messages.
 # V15: Added Universal UEFI Support (32-bit/i386-efi) with dynamic bitness detection.
+# V16: Added In-Situ (Local) Mode to repair GRUB directly from the running system without Live USB/chroot.
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
-# Start Timer for V14/V15
+# Start Timer for V14/V15/V16
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -40,7 +41,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V15: Ultimate Automation, Legacy BIOS, OS Prober & Universal UEFI"
+echo "GRUB Fixer V16: Ultimate Automation, Legacy BIOS, OS Prober, Universal UEFI & In-Situ Repair"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "=========================================="
@@ -55,6 +56,113 @@ echo ""
 # Cleanup any previous scan mounts safely
 if grep -qs ' /tmp/grub-fixer-scan' /proc/mounts; then
     sudo umount -R /tmp/grub-fixer-scan 2>/dev/null || true
+fi
+
+# ==============================================================================
+# [V16] IN-SITU (LOCAL) MODE DETECTION
+# ==============================================================================
+IS_LOCAL=0
+# Detect root filesystem type. Live USBs use overlay, iso9660, tmpfs, etc.
+CURRENT_ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "unknown")
+
+if [[ ! "$CURRENT_ROOT_FS" =~ ^(overlay|iso9660|tmpfs|squashfs|unknown)$ ]]; then
+    echo -e "\n[*] IN-SITU (LOCAL) MODE DETECTED!"
+    echo "    Your root filesystem is '$CURRENT_ROOT_FS'. You appear to be running this script"
+    echo "    directly from your installed OS (e.g., booted via Super GRUB2 Disk) rather than a Live USB."
+    read -p "-> Do you want to repair GRUB locally WITHOUT chroot? (y/n): " local_ans </dev/tty
+    if [[ "$local_ans" == "y" || "$local_ans" == "Y" ]]; then
+        IS_LOCAL=1
+    fi
+fi
+
+if [ $IS_LOCAL -eq 1 ]; then
+    echo -e "\n[*] Executing In-Situ (Local) GRUB Repair..."
+    
+    # Ensure all partitions in fstab are mounted (fixes missing /boot/efi)
+    echo "-> Running 'mount -a' to ensure boot partitions are mounted..."
+    sudo mount -a || true
+    
+    OS_NAME="Linux"
+    if [ -f "/etc/os-release" ]; then
+        source /etc/os-release
+        OS_NAME=$NAME
+    fi
+
+    # Check for EFI or Legacy locally
+    if [ -d "/sys/firmware/efi" ]; then
+        LOCAL_BOOT_MODE="efi"
+        
+        # Super GRUB2 Disk sometimes boots without mounting efivars. We must fix this.
+        if [ ! -d "/sys/firmware/efi/efivars" ] || [ -z "$(ls -A /sys/firmware/efi/efivars 2>/dev/null)" ]; then
+            echo "[!] Warning: efivars not mounted. Attempting to mount efivarfs..."
+            sudo mount -t efivarfs efivarfs /sys/firmware/efi/efivars || true
+        fi
+        
+        # Find exactly where EFI is mounted
+        LOCAL_EFI_MNT=$(findmnt -n -o TARGET -t vfat | grep -E "^/boot" | head -n 1)
+        if [ -z "$LOCAL_EFI_MNT" ]; then
+            echo "[-] Error: EFI system detected locally, but no vfat partition is mounted at /boot or /boot/efi."
+            echo "    Please mount your EFI partition and try again."
+            exit 1
+        fi
+        
+        # Local Bitness Check
+        EFI_TARGET="x86_64-efi"
+        if [ -f "/sys/firmware/efi/fw_platform_size" ]; then
+            EFI_SIZE=$(cat /sys/firmware/efi/fw_platform_size)
+            if [ "$EFI_SIZE" == "32" ]; then
+                EFI_TARGET="i386-efi"
+                echo "[!] WARNING: 32-bit UEFI architecture detected locally!"
+            fi
+        fi
+        
+        echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
+        grub-install --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+    else
+        LOCAL_BOOT_MODE="legacy"
+        # Find the physical disk of the root partition dynamically
+        ROOT_DEV=$(findmnt -n -o SOURCE / | head -n 1)
+        TARGET_DISK_NAME=$(lsblk -no PKNAME "$ROOT_DEV" | head -n 1)
+        if [ -z "$TARGET_DISK_NAME" ]; then
+            TARGET_DISK="$ROOT_DEV"
+        else
+            TARGET_DISK="/dev/$TARGET_DISK_NAME"
+        fi
+        
+        echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
+        grub-install --target=i386-pc "$TARGET_DISK"
+    fi
+    
+    echo "-> Enabling OS Prober..."
+    if [ -f /etc/default/grub ]; then
+        sed -i '/GRUB_DISABLE_OS_PROBER/d' /etc/default/grub
+        echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
+    fi
+    
+    echo "-> Generating GRUB configuration..."
+    grub-mkconfig -o /boot/grub/grub.cfg
+    
+    echo -e "\n🎉 In-Situ operation successful! GRUB repaired locally ($LOCAL_BOOT_MODE mode)."
+    
+    # V14 Execution Timer
+    END_TIME=$(date +%s)
+    TOTAL_SECONDS=$((END_TIME - START_TIME))
+    HOURS=$((TOTAL_SECONDS / 3600))
+    MINUTES=$(( (TOTAL_SECONDS % 3600) / 60 ))
+    SECONDS=$((TOTAL_SECONDS % 60))
+
+    echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+
+    if [ "$TOTAL_SECONDS" -lt 15 ]; then
+        echo "Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"
+    elif [ "$TOTAL_SECONDS" -le 60 ]; then
+        echo "Done and dusted! Not even the pros can speedrun a system repair like this. 🏆🔥"
+    else
+        echo "Took a minute, but hey... I'm the big boss, and I like to make a cinematic entrance! 👑🕶️🍿"
+    fi
+    
+    # Exit script cleanly so it doesn't run the Live USB Chroot logic below
+    exit 0 
 fi
 
 # Variables for V12 Legacy support
