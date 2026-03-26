@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V15 - Ultimate Automation, Legacy BIOS, OS Prober & Universal UEFI)
+# 🛠️ GRUB Fixer (V16 - Ultimate Automation, Legacy BIOS, OS Prober, Universal UEFI & In-Situ Repair)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V15** transforms the script into a true "Universal Rescue Weapon," bringing **Dynamic 32-bit/64-bit UEFI Detection**, a dynamic execution timer with gamer-style human responses, intelligent dual-boot detection (OS Prober), and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V16** transforms the script into a true "Universal Rescue Weapon," bringing **In-Situ (Local) Repair** capabilities, **Dynamic 32-bit/64-bit UEFI Detection**, a dynamic execution timer with gamer-style human responses, intelligent dual-boot detection (OS Prober), and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
 
 ## 🚀 Usage
 
@@ -22,10 +22,11 @@ sudo ./grub-fixer.sh
 
 ---
 
-## ✨ New in V15 (The Universal Bitness Update)
-* **Dynamic UEFI 32-bit Detection:** The script now acts as a flawless Universal Bootloader Rescue tool. It intelligently reads `/sys/firmware/efi/fw_platform_size` to detect rare 32-bit UEFI architectures (often found in older devices) and automatically switches the GRUB target to `i386-efi`, while keeping `x86_64-efi` as the standard for modern 64-bit machines.
+## ✨ New in V16 (The In-Situ Update)
+* **In-Situ (Local) Mode Detection:** The script now intelligently detects if it's being run directly from your installed OS (e.g., booted via Super GRUB2 Disk or rEFInd) rather than a Live USB. It safely bypasses the complex chroot environment and repairs GRUB locally in seconds, automatically handling unmounted EFI variables (`efivarfs`) and boot partitions.
 
-## ⚙️ Key Additions in V14, V13 & V12
+## ⚙️ Key Additions in V15, V14, V13 & V12
+* **Dynamic UEFI 32-bit Detection (V15):** The script acts as a flawless Universal Bootloader Rescue tool. It intelligently reads `/sys/firmware/efi/fw_platform_size` to detect rare 32-bit UEFI architectures (often found in older devices) and automatically switches the GRUB target to `i386-efi`, while keeping `x86_64-efi` as the standard for modern 64-bit machines.
 * **Dynamic Execution Timer (V14):** The script calculates the total execution time and delivers gamer-style, human-like status messages based on how fast the repair was completed (e.g., *"Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"*).
 * **OS Prober Integration (V13):** Solves the issue where Windows or other Linux distros disappear from the GRUB menu after a repair. It automatically modifies `/etc/default/grub` to enable `GRUB_DISABLE_OS_PROBER=false`, ensuring all installed operating systems are detected.
 * **Legacy BIOS (`i386-pc`) Support (V12):** Automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
@@ -47,7 +48,7 @@ sudo ./grub-fixer.sh
 ---
 
 ## 📋 Requirements
-* **Environment:** Live Linux ISO/USB (Arch, CachyOS, Fedora, Ubuntu, etc.).
+* **Environment:** Live Linux ISO/USB (Arch, CachyOS, Fedora, Ubuntu, etc.) **OR** directly from your installed OS if booted via a rescue tool.
 * **Architecture:** Target system must be UEFI (`x86_64-efi` or `i386-efi`) OR Legacy BIOS (`i386-pc`).
 * **Privileges:** Sudo/Root access required.
 
