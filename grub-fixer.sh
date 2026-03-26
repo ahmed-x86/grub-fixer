@@ -20,10 +20,11 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V12: Added Legacy BIOS (i386-pc) support, auto-detection, and Target Disk extraction.
 # V13: Added OS Prober support to automatically detect dual-boot systems (e.g., Windows).
 # V14: Added Execution Timer with dynamic human-like status messages.
+# V15: Added Universal UEFI Support (32-bit/i386-efi) with dynamic bitness detection.
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
-# Start Timer for V14
+# Start Timer for V14/V15
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -39,9 +40,9 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V14: Ultimate Automation, Legacy BIOS & OS Prober"
+echo "GRUB Fixer V15: Ultimate Automation, Legacy BIOS, OS Prober & Universal UEFI"
 echo "Date: $(date)"
-echo "Currently supports: x86_64-efi & i386-pc (Legacy)"
+echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "=========================================="
 echo ""
 
@@ -509,6 +510,26 @@ else
     TARGET_DISK="/dev/$TARGET_DISK_NAME"
 fi
 
+# ==========================================
+# [V15] DYNAMIC UEFI BITNESS DETECTION
+# ==========================================
+EFI_TARGET="x86_64-efi" # Default to 64-bit
+if [ "$BOOT_MODE" == "efi" ]; then
+    if [ -f "/sys/firmware/efi/fw_platform_size" ]; then
+        EFI_SIZE=$(cat /sys/firmware/efi/fw_platform_size)
+        if [ "$EFI_SIZE" == "32" ]; then
+            EFI_TARGET="i386-efi"
+            echo "[!] WARNING: 32-bit UEFI architecture detected!"
+            echo "    Setting target to: $EFI_TARGET"
+            echo "    Make sure your Live USB contains 32-bit GRUB packages (e.g., grub-efi-ia32)."
+        else
+            EFI_TARGET="x86_64-efi"
+        fi
+    else
+        echo "[i] /sys/firmware/efi/fw_platform_size not found. Assuming x86_64-efi."
+    fi
+fi
+
 echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
 echo "[*] Detected Boot Mode: ${BOOT_MODE^^}"
 
@@ -518,8 +539,8 @@ sudo chroot /mnt /bin/bash <<EOF
 set -e
 
 if [ "$BOOT_MODE" == "efi" ]; then
-    echo "-> Installing for x86_64-efi platform (with --removable flag for VM support)..."
-    grub-install --target=x86_64-efi --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+    echo "-> Installing for $EFI_TARGET platform (with --removable flag for VM support)..."
+    grub-install --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
 else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
     grub-install --target=i386-pc "$TARGET_DISK"
