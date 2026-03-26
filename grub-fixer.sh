@@ -19,8 +19,12 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V11: Zero-Interaction Mode (fstab parser), 3-Tier Fallback System.
 # V12: Added Legacy BIOS (i386-pc) support, auto-detection, and Target Disk extraction.
 # V13: Added OS Prober support to automatically detect dual-boot systems (e.g., Windows).
+# V14: Added Execution Timer with dynamic human-like status messages.
 # FUTURE: Support for LUKS.
 # ==============================================================================
+
+# Start Timer for V14
+START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
 if [[ $EUID -ne 0 ]]; then
@@ -35,7 +39,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V13: Ultimate Automation, Legacy BIOS & OS Prober"
+echo "GRUB Fixer V14: Ultimate Automation, Legacy BIOS & OS Prober"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi & i386-pc (Legacy)"
 echo "=========================================="
@@ -540,3 +544,22 @@ sudo umount -R /mnt || true
 
 echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully ($BOOT_MODE mode)."
 echo "[i] A full log of this operation has been saved to: $LOG_FILE"
+
+# ==============================================================================
+# V14 Execution Timer & Dynamic Human Responses
+# ==============================================================================
+END_TIME=$(date +%s)
+TOTAL_SECONDS=$((END_TIME - START_TIME))
+HOURS=$((TOTAL_SECONDS / 3600))
+MINUTES=$(( (TOTAL_SECONDS % 3600) / 60 ))
+SECONDS=$((TOTAL_SECONDS % 60))
+
+echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+
+if [ "$TOTAL_SECONDS" -lt 15 ]; then
+    echo "Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"
+elif [ "$TOTAL_SECONDS" -le 60 ]; then
+    echo "Done and dusted! Not even the pros can speedrun a system repair like this. 🏆🔥"
+else
+    echo "Took a minute, but hey... I'm the big boss, and I like to make a cinematic entrance! 👑🕶️🍿"
+fi
