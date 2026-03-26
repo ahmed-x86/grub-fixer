@@ -1,7 +1,6 @@
+# 🛠️ GRUB Fixer (V14 - Ultimate Automation, Legacy BIOS, OS Prober & Execution Timer)
 
-# 🛠️ GRUB Fixer (V13 - Ultimate Automation, Legacy BIOS & OS Prober)
-
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V13** is the definitive release, bringing intelligent dual-boot detection (OS Prober) alongside Universal Boot support and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V14** is the definitive release, bringing a dynamic execution timer with gamer-style human responses, intelligent dual-boot detection (OS Prober) alongside Universal Boot support and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
 
 ## 🚀 Usage
 
@@ -10,7 +9,7 @@ You can choose between the quick one-liner or the manual download method dependi
 ### Option 1: Quick One-Liner (Recommended)
 Run the script directly without downloading:
 ```bash
-curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash
+curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
 ```
 
 ### Option 2: Manual Download & Execute
@@ -23,12 +22,13 @@ sudo ./grub-fixer.sh
 
 ---
 
-## ✨ New in V13 (The Dual-Boot Update)
-* **OS Prober Integration:** Solves the issue where Windows or other Linux distros disappear from the GRUB menu after a repair. V13 automatically modifies `/etc/default/grub` to enable `GRUB_DISABLE_OS_PROBER=false`, ensuring all installed operating systems are detected and listed correctly.
+## ✨ New in V14 (The Speedrun Update)
+* **Dynamic Execution Timer:** The script now calculates the total execution time and delivers gamer-style, human-like status messages based on how fast the repair was completed (e.g., *"Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"*).
 
-## ⚙️ Key Additions in V12 (Universal Boot)
-* **Legacy BIOS (`i386-pc`) Support:** The script automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
-* **Smart Target Disk Extraction:** In Legacy BIOS mode, V12 uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition (e.g., `/dev/sda`), ensuring flawless GRUB installation on older machines.
+## ⚙️ Key Additions in V13 & V12
+* **OS Prober Integration (V13):** Solves the issue where Windows or other Linux distros disappear from the GRUB menu after a repair. V13 automatically modifies `/etc/default/grub` to enable `GRUB_DISABLE_OS_PROBER=false`, ensuring all installed operating systems are detected and listed correctly.
+* **Legacy BIOS (`i386-pc`) Support (V12):** The script automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
+* **Smart Target Disk Extraction (V12):** In Legacy BIOS mode, uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition (e.g., `/dev/sda`), ensuring flawless GRUB installation on older machines.
 
 ## 🧠 Core Features (From V11 & V10)
 * **Zero-Interaction FSTAB Parsing (Tier 1):** Automatically scans devices to locate and parse your system's `/etc/fstab`. It resolves `UUID` and `PARTUUID` tags instantly, mapping out your exact system layout (Root, Boot, EFI, and Btrfs subvolumes) without manual input.
