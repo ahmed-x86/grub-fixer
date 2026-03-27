@@ -1,56 +1,68 @@
-# 🛠️ GRUB Fixer (V16 - Ultimate Automation, Legacy BIOS, OS Prober, Universal UEFI & In-Situ Repair)
+# 🛠️ GRUB Fixer (V17 - The "Deep Scan" & Unified UX Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on both **UEFI and Legacy BIOS** Linux systems. **V16** transforms the script into a true "Universal Rescue Weapon," bringing **In-Situ (Local) Repair** capabilities, **Dynamic 32-bit/64-bit UEFI Detection**, a dynamic execution timer with gamer-style human responses, intelligent dual-boot detection (OS Prober), and the powerful **Zero-Interaction "Pro Mode"** that parses `/etc/fstab` to map and mount complex layouts (like Btrfs subvolumes) in seconds.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V17** pushes the boundaries of automation with **Kernel Command Line Detection**, a proactive **Deep Scan Engine**, and a **Unified One-Click Confirmation** system that eliminates decision fatigue during system recovery.
 
 ## 🚀 Usage
 
-You can choose between the quick one-liner or the manual download method depending on your environment.
+Run the "Ultimate Rescue Weapon" with a single command:
 
 ### Option 1: Quick One-Liner (Recommended)
-Run the script directly without downloading:
+
 ```bash
 curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
 ```
 
-### Option 2: Manual Download & Execute
-If you prefer to have the file locally or want to audit the code before running:
+### Option 2: Manual Download
+
 ```bash
 curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh
 ```
 
----
+-----
 
-## ✨ New in V16 (The In-Situ Update)
-* **In-Situ (Local) Mode Detection:** The script now intelligently detects if it's being run directly from your installed OS (e.g., booted via Super GRUB2 Disk or rEFInd) rather than a Live USB. It safely bypasses the complex chroot environment and repairs GRUB locally in seconds, automatically handling unmounted EFI variables (`efivarfs`) and boot partitions.
+## ✨ New in V17 (The Intelligence Update)
 
-## ⚙️ Key Additions in V15, V14, V13 & V12
-* **Dynamic UEFI 32-bit Detection (V15):** The script acts as a flawless Universal Bootloader Rescue tool. It intelligently reads `/sys/firmware/efi/fw_platform_size` to detect rare 32-bit UEFI architectures (often found in older devices) and automatically switches the GRUB target to `i386-efi`, while keeping `x86_64-efi` as the standard for modern 64-bit machines.
-* **Dynamic Execution Timer (V14):** The script calculates the total execution time and delivers gamer-style, human-like status messages based on how fast the repair was completed (e.g., *"Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"*).
-* **OS Prober Integration (V13):** Solves the issue where Windows or other Linux distros disappear from the GRUB menu after a repair. It automatically modifies `/etc/default/grub` to enable `GRUB_DISABLE_OS_PROBER=false`, ensuring all installed operating systems are detected.
-* **Legacy BIOS (`i386-pc`) Support (V12):** Automatically detects if your system lacks an EFI partition and dynamically switches to Legacy mode.
-* **Smart Target Disk Extraction (V12):** In Legacy BIOS mode, uses `lsblk -no PKNAME` to intelligently extract the parent disk from your root partition (e.g., `/dev/sda`), ensuring flawless GRUB installation on older machines.
+  * **Kernel Cmdline Environment Detection:** The script now reads `/proc/cmdline` to differentiate between a **Live ISO** (Archiso, Casper, Miso, etc.) and a **Real Machine** installation with 100% accuracy.
+  * **Deep Scan Engine:** Before asking a single question, V17 performs a stealthy background scan. It temporarily mounts partitions to find your `/etc/fstab`, mapping your entire system layout (Root, Boot, EFI, and Btrfs subvolumes) before you even hit "Enter."
+  * **Unified One-Click Confirmation:** No more "death by a thousand questions." V17 presents the detected layout and environment in a clean summary and asks for a single confirmation to proceed.
+  * **Automatic `efivarfs` Repair:** Enhanced In-Situ logic to automatically mount `efivarfs` if the rescue environment (like Super GRUB2 Disk) fails to do so.
 
-## 🧠 Core Features (From V11 & V10)
-* **Zero-Interaction FSTAB Parsing (Tier 1):** Automatically scans devices to locate and parse your system's `/etc/fstab`. It resolves `UUID` and `PARTUUID` tags instantly, mapping out your exact system layout (Root, Boot, EFI, and Btrfs subvolumes) without manual input.
-* **3-Tier Fallback System:** If `fstab` is missing, encrypted, or rejected, the script gracefully falls back to Smart Auto-Detection (Tier 2), and finally to fully Manual Input (Tier 3), guaranteeing a crash-free experience.
-* **Bulletproof Btrfs Loop:** In manual/fallback mode, an interactive loop ensures required subvolumes (e.g., `@`, `@home`, `@log`) are mounted in the correct hierarchy with strict input validation.
-* **Dynamic EFI Mount Logic:** Solves the common "missing kernel" trap by automatically verifying and applying the correct EFI mount path (`/boot` vs `/boot/efi`), which is critical for **Archinstall** and **CachyOS** setups.
-* **VM & NVRAM Rescue:** Uses the `--removable` flag to guarantee booting on Virtual Machines (QEMU/KVM) and stubborn UEFI firmware that drop NVRAM variables.
+## ⚙️ Evolution Registry (V16 - V12)
 
-## 💎 Advanced Rescue Tech
-* **Blackbox Logging System:** Automatically captures and logs all standard output and errors directly to `/var/log/grub-fixer.log` for a complete forensic troubleshooting trail.
-* **Pipeline Ready:** Fully compatible with `curl | bash` pipelines thanks to TTY redirection for all user inputs.
-* **OS Detection:** Automatically sources `/etc/os-release` from the target system to set the correct Bootloader ID.
-* **Safety & Cleanup:** Forced `set -e` for immediate halt on errors and automatic `umount -R` cleanup to prevent mount conflicts.
+  * **In-Situ (Local) Repair (V16):** Allows repairing GRUB directly from the installed OS without a Live USB/Chroot environment.
+  * **Universal UEFI Support (V15):** Detects 32-bit vs 64-bit UEFI architectures (`fw_platform_size`) and switches between `i386-efi` and `x86_64-efi` automatically.
+  * **Gamer-Style Execution Timer (V14):** Provides human-like feedback based on speed (e.g., *"Wait, did I just fix that?\! You didn't even get to sip your coffee\! ☕"*).
+  * **OS Prober Integration (V13):** Automatically enables `GRUB_DISABLE_OS_PROBER=false` to ensure Windows and other distros appear in the menu.
+  * **Legacy BIOS support (V12):** Full support for `i386-pc` with intelligent parent disk extraction (e.g., detecting `/dev/sda` from `/dev/sda1`).
 
----
+## 🧠 Core "Pro" Features
 
-## 📋 Requirements
-* **Environment:** Live Linux ISO/USB (Arch, CachyOS, Fedora, Ubuntu, etc.) **OR** directly from your installed OS if booted via a rescue tool.
-* **Architecture:** Target system must be UEFI (`x86_64-efi` or `i386-efi`) OR Legacy BIOS (`i386-pc`).
-* **Privileges:** Sudo/Root access required.
+  * **3-Tier Fallback System:**
+    1.  **Tier 1:** Zero-Interaction `fstab` Parsing.
+    2.  **Tier 2:** Smart Auto-Detection (lsblk & blkid).
+    3.  **Tier 3:** Manual Interactive Input.
+  * **Btrfs Mastery:** Automatic handling of subvolumes (like `@`, `@home`, `@log`) with a bulletproof validation loop.
+  * **NVRAM & VM Rescue:** Uses the `--removable` flag to ensure compatibility with stubborn UEFI firmware and Virtual Machines (QEMU/KVM).
+  * **Blackbox Logging:** Every action is logged to `/var/log/grub-fixer.log` for post-repair forensics.
+
+-----
+
+## 📋 Requirements & Compatibility
+
+  * **Architecture:** x86\_64 or i386.
+  * **Platform:** UEFI (any bitness) or Legacy BIOS.
+  * **Filesystems:** Ext4, Btrfs (including subvolumes), XFS.
+  * **Privileges:** Sudo/Root access required.
 
 ## ⚠️ Disclaimer
-While highly automated, GRUB repair touches critical system files. Always verify the auto-detected partitions, `fstab` layout, and subvolumes before confirming the repair process, especially on dual-boot systems.
+
+V17 is designed to be the safest version yet, but repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+
+-----
+
+**Developed with  by [ahmed-x86](https://www.google.com/search?q=https://github.com/ahmed-x86)**
+*Arch Linux Power User | Open Source Enthusiast*
+
+-----
