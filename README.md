@@ -62,7 +62,7 @@ V17 is designed to be the safest version yet, but repairing bootloaders involves
 
 -----
 
-**Developed with  by [ahmed-x86](https://www.google.com/search?q=https://github.com/ahmed-x86)**
+**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
 *Arch Linux Power User | Open Source Enthusiast*
 
 -----
