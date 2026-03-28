@@ -24,7 +24,7 @@
 # V18: Added CLI Flags (--version, -env l/h, -auto) for complete Zero-Interaction Automation.
 # V19: Added universal support for RedHat/Fedora/CentOS family (dynamic grub2 commands & paths).
 # V20: Chroot Health Check - Auto-detects and installs missing GRUB/EFI packages with DNS resolv support.
-# FUTURE: Support for LUKS.
+# V21: LUKS & LVM Encryption Support - Auto-detects, unlocks (visible password), and configures GRUB_ENABLE_CRYPTODISK.
 # ==============================================================================
 
 # ==============================================================================
@@ -36,7 +36,7 @@ AUTO_CONFIRM=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V20"
+            echo "GRUB Fixer V21"
             exit 0
             ;;
         -env|--env)
@@ -65,7 +65,7 @@ done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14-V20
+# Start Timer for V14-V21
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -81,7 +81,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V20: Chroot Health Check & Auto-Dependency Resolver"
+echo "GRUB Fixer V21: The LUKS Encryption & Health Check Update"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -124,7 +124,56 @@ else
     echo -e "\n[*] V17 Smart Detection: Analyzed Kernel Parameters..."
 fi
 
-echo "[*] Initializing Deep Scan for system layout..."
+# ==============================================================================
+# [V21] EARLY LUKS ENCRYPTION DETECTION & DECRYPTION
+# ==============================================================================
+HAS_LUKS=0
+if lsblk -o FSTYPE | grep -q "crypto_LUKS"; then
+    HAS_LUKS=1
+fi
+
+if [ $HAS_LUKS -eq 1 ] && [ $IS_LIVE -eq 1 ]; then
+    echo -e "\n[*] V21 Intelligence: Encrypted (LUKS) partitions detected!"
+    LUKS_PARTS=($(lsblk -l -o NAME,FSTYPE | awk '$2=="crypto_LUKS" {print $1}'))
+    
+    if [ $AUTO_CONFIRM -eq 1 ]; then
+        echo "[-] Auto mode active. Cannot interactively decrypt LUKS. Assuming they are already unlocked..."
+    else
+        read -p "-> Do you want to unlock them now to find your system? (y/n): " luks_ans </dev/tty
+        if [[ "$luks_ans" == "y" || "$luks_ans" == "Y" ]]; then
+            if ! command -v cryptsetup &> /dev/null; then
+                echo "[-] Error: 'cryptsetup' is not installed on this Live environment."
+                echo "    Please install it (e.g., pacman -Sy cryptsetup) and run the script again."
+            else
+                for l_part in "${LUKS_PARTS[@]}"; do
+                    mapper_name="crypt_${l_part}"
+                    if [ -b "/dev/mapper/$mapper_name" ]; then
+                        echo "   [i] /dev/$l_part is already unlocked."
+                    else
+                        echo "-> Unlocking /dev/$l_part..."
+                        # V21: Visible password input as requested by user to prevent typos!
+                        read -p "   Enter LUKS Password for $l_part (Visible Input): " luks_pass </dev/tty
+                        echo -n "$luks_pass" | sudo cryptsetup luksOpen "/dev/$l_part" "$mapper_name" -
+                        if [ $? -eq 0 ]; then
+                            echo "   [+] Successfully unlocked to /dev/mapper/$mapper_name"
+                        else
+                            echo "   [-] Failed to unlock /dev/$l_part. Please check the password."
+                        fi
+                    fi
+                done
+                
+                echo "[*] Scanning for Logical Volumes (LVM) inside unlocked partitions..."
+                if command -v vgchange &> /dev/null; then
+                    sudo vgchange -ay || true
+                else
+                    echo "   [i] 'lvm2' not found on Live USB. Skipping LVM scan."
+                fi
+            fi
+        fi
+    fi
+fi
+
+echo -e "\n[*] Initializing Deep Scan for system layout..."
 
 SCAN_MNT="/tmp/grub-fixer-scan"
 mkdir -p "$SCAN_MNT"
@@ -293,11 +342,12 @@ if [ $IS_LOCAL -eq 1 ]; then
         fi
     fi
 
-    # [V20] In-Situ Health Check
+    # [V20/V21] In-Situ Health Check
     echo -e "\n[*] Performing In-Situ Health Check..."
     MISSING_PKGS=()
     if ! command -v $GRUB_INSTALL_CMD &> /dev/null; then MISSING_PKGS+=("grub2" "grub"); fi
     if ! command -v os-prober &> /dev/null; then MISSING_PKGS+=("os-prober"); fi
+    if [ "$HAS_LUKS" -eq 1 ] && ! command -v cryptsetup &> /dev/null; then MISSING_PKGS+=("cryptsetup"); fi
 
     # Check for EFI or Legacy locally
     if [ -d "/sys/firmware/efi" ]; then
@@ -332,11 +382,17 @@ if [ $IS_LOCAL -eq 1 ]; then
         LOCAL_BOOT_MODE="legacy"
         # Find the physical disk of the root partition dynamically
         ROOT_DEV=$(findmnt -n -o SOURCE / | head -n 1)
-        TARGET_DISK_NAME=$(lsblk -no PKNAME "$ROOT_DEV" | head -n 1)
-        if [ -z "$TARGET_DISK_NAME" ]; then
-            TARGET_DISK="$ROOT_DEV"
+        
+        # [V21] Smarter Parent Disk Extraction for nested LUKS/LVM in Legacy Mode
+        PARENT_1=$(lsblk -no PKNAME "$ROOT_DEV" | head -n 1)
+        PARENT_2=$(lsblk -no PKNAME "/dev/$PARENT_1" 2>/dev/null | head -n 1)
+        
+        if [ -n "$PARENT_2" ]; then
+            TARGET_DISK="/dev/$PARENT_2"
+        elif [ -n "$PARENT_1" ]; then
+            TARGET_DISK="/dev/$PARENT_1"
         else
-            TARGET_DISK="/dev/$TARGET_DISK_NAME"
+            TARGET_DISK="$ROOT_DEV"
         fi
     fi
 
@@ -374,6 +430,15 @@ if [ $IS_LOCAL -eq 1 ]; then
     if [ -f /etc/default/grub ]; then
         sed -i '/GRUB_DISABLE_OS_PROBER/d' /etc/default/grub
         echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
+    fi
+
+    # [V21] Write Cryptodisk Flag
+    if [ "$HAS_LUKS" -eq 1 ]; then
+        echo "-> Enabling LUKS support in GRUB (GRUB_ENABLE_CRYPTODISK=y)..."
+        if [ -f /etc/default/grub ]; then
+            sed -i '/GRUB_ENABLE_CRYPTODISK/d' /etc/default/grub
+            echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
+        fi
     fi
     
     echo "-> Generating GRUB configuration..."
@@ -547,7 +612,7 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
         # Root partition is REQUIRED
         echo "[*] Root partition is REQUIRED to repair the system."
         while true; do
-            read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
+            read -p "What is the Root (/) partition name? (e.g., vda3 or mapper/crypt_vda3): " root_part </dev/tty
             if [ -b "/dev/$root_part" ]; then
                 break
             else
@@ -753,7 +818,7 @@ else
 fi
 
 # ==========================================
-# [V20] CHROOT HEALTH CHECK & DEPENDENCY RESOLUTION
+# [V20/V21] CHROOT HEALTH CHECK & DEPENDENCY RESOLUTION
 # ==========================================
 echo -e "\n[*] Performing Chroot Health Check..."
 MISSING_CHROOT_PKGS=()
@@ -761,6 +826,7 @@ MISSING_CHROOT_PKGS=()
 # Check commands inside chroot
 if ! sudo chroot /mnt /bin/bash -c "command -v $GRUB_INSTALL_CMD" &> /dev/null; then MISSING_CHROOT_PKGS+=("grub2" "grub"); fi
 if ! sudo chroot /mnt /bin/bash -c "command -v os-prober" &> /dev/null; then MISSING_CHROOT_PKGS+=("os-prober"); fi
+if [ "$HAS_LUKS" -eq 1 ] && ! sudo chroot /mnt /bin/bash -c "command -v cryptsetup" &> /dev/null; then MISSING_CHROOT_PKGS+=("cryptsetup"); fi
 
 if [ "$BOOT_MODE" == "efi" ]; then
     if ! sudo chroot /mnt /bin/bash -c "command -v efibootmgr" &> /dev/null; then MISSING_CHROOT_PKGS+=("efibootmgr"); fi
@@ -792,16 +858,18 @@ else
 fi
 
 # ==========================================
-# [V12] TARGET DISK EXTRACTION FOR LEGACY
+# [V12/V21] TARGET DISK EXTRACTION FOR LEGACY
 # ==========================================
-# lsblk -no PKNAME extracts the parent disk (e.g. 'sda' from 'sda1' or 'nvme0n1' from 'nvme0n1p2')
-TARGET_DISK_NAME=$(lsblk -no PKNAME "/dev/$root_part" | head -n 1)
+# lsblk -no PKNAME extracts the parent disk. V21 supports nested LUKS/LVM.
+PARENT_1=$(lsblk -no PKNAME "/dev/$root_part" | head -n 1)
+PARENT_2=$(lsblk -no PKNAME "/dev/$PARENT_1" 2>/dev/null | head -n 1)
 
-if [ -z "$TARGET_DISK_NAME" ]; then
-    # Fallback just in case it's already a whole disk or LVM
-    TARGET_DISK="/dev/$root_part"
+if [ -n "$PARENT_2" ]; then
+    TARGET_DISK="/dev/$PARENT_2"
+elif [ -n "$PARENT_1" ]; then
+    TARGET_DISK="/dev/$PARENT_1"
 else
-    TARGET_DISK="/dev/$TARGET_DISK_NAME"
+    TARGET_DISK="/dev/$root_part"
 fi
 
 # ==========================================
@@ -854,6 +922,15 @@ if [ -f /etc/default/grub ]; then
     echo "GRUB_DISABLE_OS_PROBER=false" >> /etc/default/grub
 fi
 
+# [V21] Write Cryptodisk Flag
+if [ "$HAS_LUKS" -eq 1 ]; then
+    echo "-> Enabling LUKS support in GRUB (GRUB_ENABLE_CRYPTODISK=y)..."
+    if [ -f /etc/default/grub ]; then
+        sed -i '/GRUB_ENABLE_CRYPTODISK/d' /etc/default/grub
+        echo "GRUB_ENABLE_CRYPTODISK=y" >> /etc/default/grub
+    fi
+fi
+
 echo "-> Generating GRUB configuration..."
 $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
 
@@ -864,6 +941,20 @@ EOF
 # 9. Unmount and print success message
 echo -e "\n[*] Unmounting filesystems..."
 sudo umount -R /mnt || true
+
+# [V21] Relock LUKS securely
+if [ "$HAS_LUKS" -eq 1 ] && [ "$IS_LOCAL" -eq 0 ]; then
+    echo "[*] Relocking LUKS partitions to secure your data..."
+    if command -v vgchange &> /dev/null; then
+        sudo vgchange -an 2>/dev/null || true
+    fi
+    for l_part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="crypto_LUKS" {print $1}'); do
+        mapper_name="crypt_${l_part}"
+        if [ -b "/dev/mapper/$mapper_name" ]; then
+            sudo cryptsetup luksClose "$mapper_name" 2>/dev/null || true
+        fi
+    done
+fi
 
 echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired successfully ($BOOT_MODE mode)."
 echo "[i] A full log of this operation has been saved to: $LOG_FILE"
