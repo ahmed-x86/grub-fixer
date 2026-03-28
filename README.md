@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V19 - The "Universal RedHat/Fedora" Update)
+# 🛠️ GRUB Fixer (V20 - The "Health Check & Auto-Dependency Resolver" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V19** elevates the script to a truly universal tool by adding deep, dynamic support for the **RedHat/Fedora family** (CentOS, Rocky, AlmaLinux), seamlessly switching commands and paths on the fly. This builds upon the proactive **Deep Scan Engine**, **Kernel Command Line Detection**, and **Zero-Interaction** features of V18.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V20** pushes the script to the ultimate level of proactive recovery by automatically detecting and installing missing bootloader dependencies inside the broken system, complete with DNS resolution tunneling. This builds upon the **Universal RedHat/Fedora Support** (V19), **Deep Scan Engine**, and **Zero-Interaction** features of previous versions.
 
 ## 🚀 Usage
 
@@ -9,21 +9,29 @@ Run the "Ultimate Rescue Weapon" directly from your terminal:
 ### Option 1: Quick One-Liner (Interactive Mode)
 The classic, smart, and unified interactive experience:
 ```bash
-curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
+curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash
 ```
 
 ### Option 2: Fully Automated (Zero-Interaction Mode) 💥
 Skip all questions and let the script fix GRUB silently based on auto-detection (perfect for Live USBs):
 ```bash
-curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash -s -- -env l -auto
+curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash -s -- -env l -auto
 ```
 
 ### Option 3: Manual Download
 ```bash
-curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
+curl -O [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh)
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh [FLAGS]
 ```
+
+---
+
+## 🩺 The Health Check Update (V20)
+
+* **Smart Dependency Resolution:** Automatically detects if crucial packages (`grub`, `grub2`, `os-prober`, `efibootmgr`) are missing inside the target broken system (Chroot or In-Situ).
+* **Multi-Package Manager Support:** Dynamically utilizes `pacman`, `apt-get`, `dnf`, or `zypper` to seamlessly install missing dependencies on the fly.
+* **DNS Tunneling (`resolv.conf`):** Automatically copies the live host's `/etc/resolv.conf` into the chroot, ensuring the package managers have full internet access to download required fixes.
 
 ---
 
@@ -87,7 +95,7 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ## ⚠️ Disclaimer
 
-While V19 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V20 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
