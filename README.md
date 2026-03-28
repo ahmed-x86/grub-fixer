@@ -83,5 +83,5 @@ While V18 is designed to be the safest and smartest version yet, repairing bootl
 
 ---
 
-**Developed with ❤️ by [ahmed-x86](https://github.com/ahmed-x86)**
+**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
 *Arch Linux Power User | Open Source Enthusiast*
