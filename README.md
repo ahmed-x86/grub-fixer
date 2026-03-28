@@ -1,6 +1,7 @@
-# 🛠️ GRUB Fixer (V20 - The "Health Check & Auto-Dependency Resolver" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V20** pushes the script to the ultimate level of proactive recovery by automatically detecting and installing missing bootloader dependencies inside the broken system, complete with DNS resolution tunneling. This builds upon the **Universal RedHat/Fedora Support** (V19), **Deep Scan Engine**, and **Zero-Interaction** features of previous versions.
+# 🛠️ GRUB Fixer (V21 - The "LUKS Encryption" Update)
+
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V21** transforms the script into an unstoppable rescue tool by introducing native support for **LUKS Full Disk Encryption** and **LVM**, allowing it to unlock, mount, and repair fully encrypted systems seamlessly. This builds upon the **Chroot Health Checks** (V20), **Universal RedHat/Fedora Support** (V19), and **Deep Scan Engine** of previous versions.
 
 ## 🚀 Usage
 
@@ -27,9 +28,19 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ---
 
+## 🔐 The LUKS Encryption Update (V21)
+
+* **Early LUKS Detection:** Scans for `crypto_LUKS` partitions *before* the Deep Scan Engine starts, preventing scan failures on encrypted drives.
+* **Interactive Smart Decryption:** Prompts to unlock partitions using `cryptsetup` with visible password input to prevent lockouts due to typos.
+* **LVM Auto-Activation:** Automatically runs `vgchange -ay` to expose hidden Logical Volumes inside unlocked LUKS containers.
+* **Auto-Cryptodisk Injection:** Automatically appends `GRUB_ENABLE_CRYPTODISK=y` to `/etc/default/grub` ensuring the repaired system actually prompts for a password on boot.
+* **Secure Relocking:** Safely executes `luksClose` and deactivates volume groups after a successful repair to maintain data security.
+
+---
+
 ## 🩺 The Health Check Update (V20)
 
-* **Smart Dependency Resolution:** Automatically detects if crucial packages (`grub`, `grub2`, `os-prober`, `efibootmgr`) are missing inside the target broken system (Chroot or In-Situ).
+* **Smart Dependency Resolution:** Automatically detects if crucial packages (`grub`, `grub2`, `os-prober`, `efibootmgr`, `cryptsetup`) are missing inside the target broken system (Chroot or In-Situ).
 * **Multi-Package Manager Support:** Dynamically utilizes `pacman`, `apt-get`, `dnf`, or `zypper` to seamlessly install missing dependencies on the fly.
 * **DNS Tunneling (`resolv.conf`):** Automatically copies the live host's `/etc/resolv.conf` into the chroot, ensuring the package managers have full internet access to download required fixes.
 
@@ -69,7 +80,7 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 * **Universal UEFI Support (V15):** Detects 32-bit vs 64-bit UEFI architectures (`fw_platform_size`) and switches between `i386-efi` and `x86_64-efi` automatically.
 * **Gamer-Style Execution Timer (V14):** Provides human-like feedback based on speed (e.g., *"Wait, did I just fix that?! You didn't even get to sip your coffee! ☕"*).
 * **OS Prober Integration (V13):** Automatically enables `GRUB_DISABLE_OS_PROBER=false` to ensure Windows and other distros appear in the menu.
-* **Legacy BIOS support (V12):** Full support for `i386-pc` with intelligent parent disk extraction (e.g., detecting `/dev/sda` from `/dev/sda1`).
+* **Legacy BIOS support (V12):** Full support for `i386-pc` with intelligent parent disk extraction (handles nested LUKS/LVM).
 
 ---
 
@@ -90,12 +101,12 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 * **OS Families:** Arch Linux, Debian/Ubuntu, RedHat/Fedora, SUSE, and derivatives.
 * **Architecture:** x86_64 or i386.
 * **Platform:** UEFI (any bitness) or Legacy BIOS.
-* **Filesystems:** Ext4, Btrfs (including subvolumes), XFS.
+* **Filesystems:** Ext4, Btrfs (including subvolumes), XFS, LUKS, LVM2.
 * **Privileges:** Sudo/Root access required.
 
 ## ⚠️ Disclaimer
 
-While V20 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V21 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
