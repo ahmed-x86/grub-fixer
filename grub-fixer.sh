@@ -23,6 +23,7 @@
 # V17: Added Kernel cmdline detection for Live vs Real, and unified One-Click Confirmation prompt.
 # V18: Added CLI Flags (--version, -env l/h, -auto) for complete Zero-Interaction Automation.
 # V19: Added universal support for RedHat/Fedora/CentOS family (dynamic grub2 commands & paths).
+# V20: Chroot Health Check - Auto-detects and installs missing GRUB/EFI packages with DNS resolv support.
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
@@ -35,7 +36,7 @@ AUTO_CONFIRM=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V19"
+            echo "GRUB Fixer V20"
             exit 0
             ;;
         -env|--env)
@@ -64,7 +65,7 @@ done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14/V15/V16/V17/V18/V19
+# Start Timer for V14-V20
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -80,7 +81,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V19: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
+echo "GRUB Fixer V20: Chroot Health Check & Auto-Dependency Resolver"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -264,14 +265,6 @@ fi
 # ==============================================================================
 # [V16] IN-SITU (LOCAL) MODE DETECTION & EXECUTION
 # ==============================================================================
-# [V17 Update: The IS_LOCAL variable is now smartly managed by the Unified Prompt above. 
-# The original V16 logic below is preserved but bypassed for user input.]
-# CURRENT_ROOT_FS=$(findmnt -n -o FSTYPE / 2>/dev/null || echo "unknown")
-# if [[ ! "$CURRENT_ROOT_FS" =~ ^(overlay|iso9660|tmpfs|squashfs|unknown)$ ]]; then
-#    echo -e "\n[*] IN-SITU (LOCAL) MODE DETECTED!"
-#    ...
-# fi
-
 if [ $IS_LOCAL -eq 1 ]; then
     echo -e "\n[*] Executing In-Situ (Local) GRUB Repair..."
     
@@ -300,9 +293,16 @@ if [ $IS_LOCAL -eq 1 ]; then
         fi
     fi
 
+    # [V20] In-Situ Health Check
+    echo -e "\n[*] Performing In-Situ Health Check..."
+    MISSING_PKGS=()
+    if ! command -v $GRUB_INSTALL_CMD &> /dev/null; then MISSING_PKGS+=("grub2" "grub"); fi
+    if ! command -v os-prober &> /dev/null; then MISSING_PKGS+=("os-prober"); fi
+
     # Check for EFI or Legacy locally
     if [ -d "/sys/firmware/efi" ]; then
         LOCAL_BOOT_MODE="efi"
+        if ! command -v efibootmgr &> /dev/null; then MISSING_PKGS+=("efibootmgr"); fi
         
         # Super GRUB2 Disk sometimes boots without mounting efivars. We must fix this.
         if [ ! -d "/sys/firmware/efi/efivars" ] || [ -z "$(ls -A /sys/firmware/efi/efivars 2>/dev/null)" ]; then
@@ -328,8 +328,6 @@ if [ $IS_LOCAL -eq 1 ]; then
             fi
         fi
         
-        echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
-        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
     else
         LOCAL_BOOT_MODE="legacy"
         # Find the physical disk of the root partition dynamically
@@ -340,7 +338,34 @@ if [ $IS_LOCAL -eq 1 ]; then
         else
             TARGET_DISK="/dev/$TARGET_DISK_NAME"
         fi
+    fi
+
+    # [V20] In-Situ Package Installation
+    if [ ${#MISSING_PKGS[@]} -ne 0 ]; then
+        echo "[-] Warning: Missing required packages: ${MISSING_PKGS[*]}"
+        if [ $AUTO_CONFIRM -eq 1 ]; then
+            install_ans="y"
+        else
+            read -p "-> Do you want me to attempt installing them? (y/n): " install_ans </dev/tty
+        fi
         
+        if [[ "$install_ans" == "y" || "$install_ans" == "Y" ]]; then
+            if command -v pacman &> /dev/null; then sudo pacman -Sy --noconfirm ${MISSING_PKGS[*]};
+            elif command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y ${MISSING_PKGS[*]};
+            elif command -v dnf &> /dev/null; then sudo dnf install -y ${MISSING_PKGS[*]};
+            elif command -v zypper &> /dev/null; then sudo zypper install -y ${MISSING_PKGS[*]};
+            else echo "[-] Could not determine package manager. Please install them manually."; exit 1; fi
+        else
+            echo "[-] Repair might fail without these packages. Proceeding anyway..."
+        fi
+    else
+         echo "[+] Health Check Passed: All required packages are installed."
+    fi
+
+    if [ "$LOCAL_BOOT_MODE" == "efi" ]; then
+        echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+    else
         echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
         $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
     fi
@@ -381,18 +406,6 @@ fi
 BOOT_MODE="legacy" # Default to legacy until proven it's EFI
 efi_mount_path=""
 root_part=""
-
-# ==============================================================================
-# TIER 1: PRO FSTAB AUTO-DETECTION (V11/V12)
-# [V17 Update: The fstab Deep Scan logic has been successfully moved to the 
-# top to feed the new Unified Prompt. The original code here is preserved 
-# in structure but bypassed for execution.]
-# ==============================================================================
-# echo "[*] TIER 1: Initializing Deep Scan for fstab..."
-# SCAN_MNT="/tmp/grub-fixer-scan"
-# ...
-# read -p "Is this fstab configuration 100% correct? (y/n): " pro_ans </dev/tty
-# ...
 
 # ==============================================================================
 # EXECUTION: TIER 1 (PRO FSTAB)
@@ -489,10 +502,6 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
     done
     rm -rf "$TMP_EFI_MNT"
 
-    # [V17 Update: Redundant SUGGESTED_ROOT logic is safely bypassed here 
-    # since it was presented in the Unified Prompt.]
-
-    # Ask the user based on your idea (V17: Only ask if they didn't already accept it)
     if [ "$V17_CONFIRM_ANS" == "y" ]; then
         confirm_ans="y"
         echo "[+] Using accepted basic auto-detection..."
@@ -716,6 +725,12 @@ sudo mount --bind /proc /mnt/proc
 sudo mount --bind /sys /mnt/sys
 sudo mount --bind /run /mnt/run
 
+# [V20] Copy resolv.conf to enable DNS resolution inside chroot
+if [ -f /etc/resolv.conf ]; then
+    echo "-> Copying /etc/resolv.conf for network access inside chroot..."
+    sudo cp /etc/resolv.conf /mnt/etc/resolv.conf || true
+fi
+
 # 7. [V19] Read the distribution name safely and map GRUB commands
 OS_NAME="Linux"
 GRUB_INSTALL_CMD="grub-install"
@@ -735,6 +750,45 @@ if [ -f "/mnt/etc/os-release" ]; then
     fi
 else
     echo "[-] Warning: /mnt/etc/os-release not found. Defaulting OS_NAME to 'Linux'."
+fi
+
+# ==========================================
+# [V20] CHROOT HEALTH CHECK & DEPENDENCY RESOLUTION
+# ==========================================
+echo -e "\n[*] Performing Chroot Health Check..."
+MISSING_CHROOT_PKGS=()
+
+# Check commands inside chroot
+if ! sudo chroot /mnt /bin/bash -c "command -v $GRUB_INSTALL_CMD" &> /dev/null; then MISSING_CHROOT_PKGS+=("grub2" "grub"); fi
+if ! sudo chroot /mnt /bin/bash -c "command -v os-prober" &> /dev/null; then MISSING_CHROOT_PKGS+=("os-prober"); fi
+
+if [ "$BOOT_MODE" == "efi" ]; then
+    if ! sudo chroot /mnt /bin/bash -c "command -v efibootmgr" &> /dev/null; then MISSING_CHROOT_PKGS+=("efibootmgr"); fi
+fi
+
+if [ ${#MISSING_CHROOT_PKGS[@]} -ne 0 ]; then
+    echo "[-] Warning: Missing required packages inside the target system: ${MISSING_CHROOT_PKGS[*]}"
+    if [ $AUTO_CONFIRM -eq 1 ]; then
+        install_ans="y"
+    else
+        read -p "-> Do you want me to attempt installing them inside chroot? (y/n): " install_ans </dev/tty
+    fi
+    
+    if [[ "$install_ans" == "y" || "$install_ans" == "Y" ]]; then
+        echo "[*] Attempting to resolve dependencies..."
+        # Running the package manager detection and installation inside chroot
+        sudo chroot /mnt /bin/bash <<EOF
+        if command -v pacman &> /dev/null; then pacman -Sy --noconfirm ${MISSING_CHROOT_PKGS[*]};
+        elif command -v apt-get &> /dev/null; then apt-get update && apt-get install -y ${MISSING_CHROOT_PKGS[*]};
+        elif command -v dnf &> /dev/null; then dnf install -y ${MISSING_CHROOT_PKGS[*]};
+        elif command -v zypper &> /dev/null; then zypper install -y ${MISSING_CHROOT_PKGS[*]};
+        else echo "[-] Could not determine package manager inside chroot. Please install manually."; exit 1; fi
+EOF
+    else
+        echo "[-] Repair might fail without these packages. Proceeding anyway..."
+    fi
+else
+    echo "[+] Health Check Passed: All required packages are present in the target system."
 fi
 
 # ==========================================
