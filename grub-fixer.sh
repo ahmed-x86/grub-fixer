@@ -22,6 +22,7 @@
 # V16: Added In-Situ (Local) Mode to repair GRUB directly from the running system without Live USB/chroot.
 # V17: Added Kernel cmdline detection for Live vs Real, and unified One-Click Confirmation prompt.
 # V18: Added CLI Flags (--version, -env l/h, -auto) for complete Zero-Interaction Automation.
+# V19: Added universal support for RedHat/Fedora/CentOS family (dynamic grub2 commands & paths).
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
@@ -34,7 +35,7 @@ AUTO_CONFIRM=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V18"
+            echo "GRUB Fixer V19"
             exit 0
             ;;
         -env|--env)
@@ -63,7 +64,7 @@ done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14/V15/V16/V17/V18
+# Start Timer for V14/V15/V16/V17/V18/V19
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -79,9 +80,10 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V18: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
+echo "GRUB Fixer V19: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
+echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
 echo "=========================================="
 echo ""
 
@@ -277,10 +279,25 @@ if [ $IS_LOCAL -eq 1 ]; then
     echo "-> Running 'mount -a' to ensure boot partitions are mounted..."
     sudo mount -a || true
     
+    # [V19] Advanced OS & Command Detection
     OS_NAME="Linux"
+    GRUB_INSTALL_CMD="grub-install"
+    GRUB_MKCONFIG_CMD="grub-mkconfig"
+    GRUB_CFG_PATH="/boot/grub/grub.cfg"
+
     if [ -f "/etc/os-release" ]; then
         source /etc/os-release
         OS_NAME=$NAME
+        # Detect RedHat/Fedora family
+        if [[ "$ID" =~ (fedora|rhel|centos|rocky|almalinux) || "$ID_LIKE" =~ (fedora|rhel|centos) ]]; then
+            echo "[i] RedHat/Fedora family detected. Switching to grub2 commands."
+            GRUB_INSTALL_CMD="grub2-install"
+            GRUB_MKCONFIG_CMD="grub2-mkconfig"
+            GRUB_CFG_PATH="/boot/grub2/grub.cfg"
+            sudo mkdir -p /boot/grub2
+        else
+            sudo mkdir -p /boot/grub
+        fi
     fi
 
     # Check for EFI or Legacy locally
@@ -312,7 +329,7 @@ if [ $IS_LOCAL -eq 1 ]; then
         fi
         
         echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
-        grub-install --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
     else
         LOCAL_BOOT_MODE="legacy"
         # Find the physical disk of the root partition dynamically
@@ -325,7 +342,7 @@ if [ $IS_LOCAL -eq 1 ]; then
         fi
         
         echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
-        grub-install --target=i386-pc "$TARGET_DISK"
+        $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
     fi
     
     echo "-> Enabling OS Prober..."
@@ -335,7 +352,7 @@ if [ $IS_LOCAL -eq 1 ]; then
     fi
     
     echo "-> Generating GRUB configuration..."
-    grub-mkconfig -o /boot/grub/grub.cfg
+    $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
     
     echo -e "\n🎉 In-Situ operation successful! GRUB repaired locally ($LOCAL_BOOT_MODE mode)."
     
@@ -699,13 +716,25 @@ sudo mount --bind /proc /mnt/proc
 sudo mount --bind /sys /mnt/sys
 sudo mount --bind /run /mnt/run
 
-# 7. Read the distribution name safely
+# 7. [V19] Read the distribution name safely and map GRUB commands
+OS_NAME="Linux"
+GRUB_INSTALL_CMD="grub-install"
+GRUB_MKCONFIG_CMD="grub-mkconfig"
+GRUB_CFG_PATH="/boot/grub/grub.cfg"
+
 if [ -f "/mnt/etc/os-release" ]; then
     source /mnt/etc/os-release
     OS_NAME=$NAME
+    
+    # Detect RedHat/Fedora family inside chroot
+    if [[ "$ID" =~ (fedora|rhel|centos|rocky|almalinux) || "$ID_LIKE" =~ (fedora|rhel|centos) ]]; then
+        echo "[i] RedHat/Fedora family detected for Chroot. Switching to grub2 commands."
+        GRUB_INSTALL_CMD="grub2-install"
+        GRUB_MKCONFIG_CMD="grub2-mkconfig"
+        GRUB_CFG_PATH="/boot/grub2/grub.cfg"
+    fi
 else
     echo "[-] Warning: /mnt/etc/os-release not found. Defaulting OS_NAME to 'Linux'."
-    OS_NAME="Linux"
 fi
 
 # ==========================================
@@ -745,16 +774,24 @@ echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
 echo "[*] Detected Boot Mode: ${BOOT_MODE^^}"
 
 # 8. Enter chroot and execute commands automatically using EOF
+# Variables like $GRUB_INSTALL_CMD are dynamically evaluated before entering Chroot!
 sudo chroot /mnt /bin/bash <<EOF
 # Enable exit-on-error inside the chroot environment as well
 set -e
 
+# Ensure the correct config directory exists inside chroot
+if [[ "$GRUB_CFG_PATH" == *grub2* ]]; then
+    mkdir -p /boot/grub2
+else
+    mkdir -p /boot/grub
+fi
+
 if [ "$BOOT_MODE" == "efi" ]; then
     echo "-> Installing for $EFI_TARGET platform (with --removable flag for VM support)..."
-    grub-install --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+    $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
 else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
-    grub-install --target=i386-pc "$TARGET_DISK"
+    $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
 fi
 
 echo "-> Enabling OS Prober to detect other operating systems (e.g., Windows)..."
@@ -764,7 +801,7 @@ if [ -f /etc/default/grub ]; then
 fi
 
 echo "-> Generating GRUB configuration..."
-grub-mkconfig -o /boot/grub/grub.cfg
+$GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
 
 echo "-> Exiting chroot environment..."
 exit
