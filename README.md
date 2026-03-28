@@ -1,7 +1,7 @@
 
-# 🛠️ GRUB Fixer (V21 - The "LUKS Encryption" Update)
+# 🛠️ GRUB Fixer (V22 - The "Secure Boot & Shim" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V21** transforms the script into an unstoppable rescue tool by introducing native support for **LUKS Full Disk Encryption** and **LVM**, allowing it to unlock, mount, and repair fully encrypted systems seamlessly. This builds upon the **Chroot Health Checks** (V20), **Universal RedHat/Fedora Support** (V19), and **Deep Scan Engine** of previous versions.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V22** transforms the script into the ultimate recovery beast by introducing native support for **Secure Boot**, seamlessly detecting its state, bypassing signature errors with `shim`, and automating the MOK enrollment process. This builds upon the **LUKS Encryption** (V21), **Chroot Health Checks** (V20), and **Universal RedHat/Fedora Support** (V19) of previous versions.
 
 ## 🚀 Usage
 
@@ -16,15 +16,24 @@ curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer
 ### Option 2: Fully Automated (Zero-Interaction Mode) 💥
 Skip all questions and let the script fix GRUB silently based on auto-detection (perfect for Live USBs):
 ```bash
-curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash -s -- -env l -auto
+curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash -s -- -env l -auto
 ```
 
 ### Option 3: Manual Download
 ```bash
-curl -O [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh)
+curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh [FLAGS]
 ```
+
+---
+
+## 🛡️ The Secure Boot Update (V22)
+
+* **Smart State Detection:** Utilizes `mokutil --sb-state` to check if Secure Boot is enforced before attempting any GRUB installation.
+* **Dynamic Shim Routing:** Automatically forces the `--uefi-secure-boot` flag on Debian/Ubuntu systems to utilize Microsoft-signed `shim` binaries instead of standard GRUB.
+* **Arch Linux `sbctl` Integration:** Detects if Arch Linux users are utilizing custom Secure Boot keys and attempts to automatically sign the new GRUB binary using `sbctl sign`.
+* **Automated MOK Enrollment:** Imports the `MOK.der` key silently and automatically feeds a One-Time Password (OTP: **1234**) to the system, leaving the user with simple, clear instructions for their next reboot to authorize the bootloader permanently.
 
 ---
 
@@ -40,7 +49,7 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ## 🩺 The Health Check Update (V20)
 
-* **Smart Dependency Resolution:** Automatically detects if crucial packages (`grub`, `grub2`, `os-prober`, `efibootmgr`, `cryptsetup`) are missing inside the target broken system (Chroot or In-Situ).
+* **Smart Dependency Resolution:** Automatically detects if crucial packages (`grub`, `grub2`, `os-prober`, `efibootmgr`, `cryptsetup`, `mokutil`) are missing inside the target broken system (Chroot or In-Situ).
 * **Multi-Package Manager Support:** Dynamically utilizes `pacman`, `apt-get`, `dnf`, or `zypper` to seamlessly install missing dependencies on the fly.
 * **DNS Tunneling (`resolv.conf`):** Automatically copies the live host's `/etc/resolv.conf` into the chroot, ensuring the package managers have full internet access to download required fixes.
 
@@ -106,7 +115,7 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ## ⚠️ Disclaimer
 
-While V21 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V22 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
