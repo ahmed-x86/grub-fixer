@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V18 - The "Zero-Interaction" Automation Update)
+# 🛠️ GRUB Fixer (V19 - The "Universal RedHat/Fedora" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V18** takes system recovery to the absolute limit with **CLI Flags for fully automated, Zero-Interaction deployments**, building upon the proactive **Deep Scan Engine** and **Kernel Command Line Detection** introduced in V17. 
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V19** elevates the script to a truly universal tool by adding deep, dynamic support for the **RedHat/Fedora family** (CentOS, Rocky, AlmaLinux), seamlessly switching commands and paths on the fly. This builds upon the proactive **Deep Scan Engine**, **Kernel Command Line Detection**, and **Zero-Interaction** features of V18.
 
 ## 🚀 Usage
 
@@ -27,6 +27,14 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ---
 
+## 🌐 The Universal Update (V19)
+
+* **RedHat/Fedora Family Support:** Full compatibility with Fedora, RHEL, CentOS, Rocky, and AlmaLinux.
+* **Dynamic Command Routing:** Automatically reads `/etc/os-release` to switch between standard `grub-install` / `grub-mkconfig` and the RedHat-specific `grub2-install` / `grub2-mkconfig`.
+* **Smart Pathing:** Intelligently manages configuration paths, dynamically creating and writing to `/boot/grub2/grub.cfg` or `/boot/grub/grub.cfg` as required by the host OS.
+
+---
+
 ## 🚩 V18 CLI Flags Reference
 
 V18 introduces Command-Line Arguments to bypass prompts and enable headless automation:
@@ -38,13 +46,12 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ---
 
-## ✨ The Intelligence Update (V17 & V18)
+## ✨ The Intelligence Update (V17)
 
-* **Headless Automation (V18):** Pass flags directly via the pipeline to execute complex GRUB repairs without a single keystroke.
-* **Kernel Cmdline Environment Detection (V17):** The script reads `/proc/cmdline` to differentiate between a **Live ISO** (Archiso, Casper, Miso, etc.) and a **Real Machine** installation with 100% accuracy.
-* **Deep Scan Engine (V17):** Before asking a single question, a stealthy background scan temporarily mounts partitions to find your `/etc/fstab`, mapping your entire system layout (Root, Boot, EFI, and Btrfs subvolumes).
-* **Unified One-Click Confirmation (V17):** No more "death by a thousand questions." The script presents the detected layout in a clean summary and asks for a single confirmation.
-* **Automatic `efivarfs` Repair (V17):** Enhanced In-Situ logic to automatically mount `efivarfs` if the rescue environment (like Super GRUB2 Disk) fails to do so.
+* **Kernel Cmdline Environment Detection:** The script reads `/proc/cmdline` to differentiate between a **Live ISO** (Archiso, Casper, Miso, etc.) and a **Real Machine** installation with 100% accuracy.
+* **Deep Scan Engine:** Before asking a single question, a stealthy background scan temporarily mounts partitions to find your `/etc/fstab`, mapping your entire system layout (Root, Boot, EFI, and Btrfs subvolumes).
+* **Unified One-Click Confirmation:** No more "death by a thousand questions." The script presents the detected layout in a clean summary and asks for a single confirmation.
+* **Automatic `efivarfs` Repair:** Enhanced In-Situ logic to automatically mount `efivarfs` if the rescue environment (like Super GRUB2 Disk) fails to do so.
 
 ---
 
@@ -72,6 +79,7 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ## 📋 Requirements & Compatibility
 
+* **OS Families:** Arch Linux, Debian/Ubuntu, RedHat/Fedora, SUSE, and derivatives.
 * **Architecture:** x86_64 or i386.
 * **Platform:** UEFI (any bitness) or Legacy BIOS.
 * **Filesystems:** Ext4, Btrfs (including subvolumes), XFS.
@@ -79,9 +87,9 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ## ⚠️ Disclaimer
 
-While V18 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V19 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
-**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
+**Developed with by [ahmed-x86](https://github.com/ahmed-x86)**
 *Arch Linux Power User | Open Source Enthusiast*
