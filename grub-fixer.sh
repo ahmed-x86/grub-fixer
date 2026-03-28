@@ -25,6 +25,7 @@
 # V19: Added universal support for RedHat/Fedora/CentOS family (dynamic grub2 commands & paths).
 # V20: Chroot Health Check - Auto-detects and installs missing GRUB/EFI packages with DNS resolv support.
 # V21: LUKS & LVM Encryption Support - Auto-detects, unlocks (visible password), and configures GRUB_ENABLE_CRYPTODISK.
+# V22: Secure Boot & Shim Integration - Auto-detects Secure Boot, handles shim-signed, and MOK Enrollment (OTP 1234).
 # ==============================================================================
 
 # ==============================================================================
@@ -36,7 +37,7 @@ AUTO_CONFIRM=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V21"
+            echo "GRUB Fixer V22"
             exit 0
             ;;
         -env|--env)
@@ -65,7 +66,7 @@ done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14-V21
+# Start Timer for V14-V22
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -81,7 +82,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V21: The LUKS Encryption & Health Check Update"
+echo "GRUB Fixer V22: The Secure Boot & LUKS Encryption Update"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -342,12 +343,28 @@ if [ $IS_LOCAL -eq 1 ]; then
         fi
     fi
 
-    # [V20/V21] In-Situ Health Check
+    # [V22] Secure Boot Detection (In-Situ)
+    SECURE_BOOT_ENABLED=0
+    if command -v mokutil &> /dev/null; then
+        if mokutil --sb-state 2>/dev/null | grep -q "SecureBoot enabled"; then
+            SECURE_BOOT_ENABLED=1
+            echo -e "\n[!] V22 Secure Boot Detected: ENABLED"
+        fi
+    fi
+
+    # [V20/V21/V22] In-Situ Health Check
     echo -e "\n[*] Performing In-Situ Health Check..."
     MISSING_PKGS=()
     if ! command -v $GRUB_INSTALL_CMD &> /dev/null; then MISSING_PKGS+=("grub2" "grub"); fi
     if ! command -v os-prober &> /dev/null; then MISSING_PKGS+=("os-prober"); fi
     if [ "$HAS_LUKS" -eq 1 ] && ! command -v cryptsetup &> /dev/null; then MISSING_PKGS+=("cryptsetup"); fi
+    
+    # V22: Check for shim if Secure Boot is enabled (Debian/Ubuntu/Fedora logic)
+    if [ "$SECURE_BOOT_ENABLED" -eq 1 ]; then
+        if ! command -v mokutil &> /dev/null; then MISSING_PKGS+=("mokutil"); fi
+        # Attempt to detect if shim is needed, highly distro-dependent, so we warn instead of forcing.
+        echo "   [i] Ensure packages like 'shim', 'shim-signed', or 'grub-efi-amd64-signed' are installed for your distro."
+    fi
 
     # Check for EFI or Legacy locally
     if [ -d "/sys/firmware/efi" ]; then
@@ -420,7 +437,14 @@ if [ $IS_LOCAL -eq 1 ]; then
 
     if [ "$LOCAL_BOOT_MODE" == "efi" ]; then
         echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
-        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+        
+        # [V22] Shim Installation Logic
+        if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$ID" =~ (debian|ubuntu|pop) ]]; then
+            echo "   [i] Debian/Ubuntu based system with Secure Boot detected. Forcing UEFI Secure Boot target."
+            $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --uefi-secure-boot
+        else
+            $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+        fi
     else
         echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
         $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
@@ -444,6 +468,24 @@ if [ $IS_LOCAL -eq 1 ]; then
     echo "-> Generating GRUB configuration..."
     $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
     
+    # [V22] MOK Enrollment for Arch/Others if needed
+    if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [ "$LOCAL_BOOT_MODE" == "efi" ]; then
+        if command -v mokutil &> /dev/null && [ -f /var/lib/shim-signed/mok/MOK.der ]; then
+             echo "-> Enrolling MOK for Secure Boot (Using OTP: 1234)..."
+             printf '1234\n1234\n' | sudo mokutil --import /var/lib/shim-signed/mok/MOK.der || true
+             echo -e "\n========================================================"
+             echo "⚠️ SECURE BOOT MOK ENROLLMENT REQUIRED ⚠️"
+             echo "1. Upon reboot, a blue screen (MokManager) will appear."
+             echo "2. Select 'Enroll MOK' -> 'Continue'."
+             echo "3. Enter the One-Time Password: 1234"
+             echo "This is required ONCE to authorize GRUB in your Motherboard."
+             echo "========================================================"
+        elif command -v sbctl &> /dev/null; then
+             echo "-> Arch Linux 'sbctl' detected. Attempting to sign GRUB..."
+             sudo sbctl sign -s "$LOCAL_EFI_MNT/EFI/$OS_NAME/grubx64.efi" || true
+        fi
+    fi
+
     echo -e "\n🎉 In-Situ operation successful! GRUB repaired locally ($LOCAL_BOOT_MODE mode)."
     
     # V14 Execution Timer
@@ -817,8 +859,17 @@ else
     echo "[-] Warning: /mnt/etc/os-release not found. Defaulting OS_NAME to 'Linux'."
 fi
 
+# [V22] Secure Boot Detection (Chroot context preparation)
+SECURE_BOOT_ENABLED=0
+if command -v mokutil &> /dev/null; then
+    if mokutil --sb-state 2>/dev/null | grep -q "SecureBoot enabled"; then
+        SECURE_BOOT_ENABLED=1
+        echo -e "\n[!] V22 Secure Boot Detected: ENABLED"
+    fi
+fi
+
 # ==========================================
-# [V20/V21] CHROOT HEALTH CHECK & DEPENDENCY RESOLUTION
+# [V20/V21/V22] CHROOT HEALTH CHECK & DEPENDENCY RESOLUTION
 # ==========================================
 echo -e "\n[*] Performing Chroot Health Check..."
 MISSING_CHROOT_PKGS=()
@@ -830,6 +881,12 @@ if [ "$HAS_LUKS" -eq 1 ] && ! sudo chroot /mnt /bin/bash -c "command -v cryptset
 
 if [ "$BOOT_MODE" == "efi" ]; then
     if ! sudo chroot /mnt /bin/bash -c "command -v efibootmgr" &> /dev/null; then MISSING_CHROOT_PKGS+=("efibootmgr"); fi
+    
+    # V22: Check for shim if Secure Boot is enabled
+    if [ "$SECURE_BOOT_ENABLED" -eq 1 ]; then
+        if ! sudo chroot /mnt /bin/bash -c "command -v mokutil" &> /dev/null; then MISSING_CHROOT_PKGS+=("mokutil"); fi
+        echo "   [i] Ensure packages like 'shim', 'shim-signed', or 'grub-efi-amd64-signed' are installed for your distro."
+    fi
 fi
 
 if [ ${#MISSING_CHROOT_PKGS[@]} -ne 0 ]; then
@@ -910,7 +967,14 @@ fi
 
 if [ "$BOOT_MODE" == "efi" ]; then
     echo "-> Installing for $EFI_TARGET platform (with --removable flag for VM support)..."
-    $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+    
+    # [V22] Shim Installation Logic
+    if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$ID" =~ (debian|ubuntu|pop) ]]; then
+        echo "   [i] Debian/Ubuntu based system with Secure Boot detected. Forcing UEFI Secure Boot target."
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --uefi-secure-boot
+    else
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+    fi
 else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
     $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
@@ -933,6 +997,24 @@ fi
 
 echo "-> Generating GRUB configuration..."
 $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
+
+# [V22] MOK Enrollment for Arch/Others if needed
+if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [ "$BOOT_MODE" == "efi" ]; then
+    if command -v mokutil &> /dev/null && [ -f /var/lib/shim-signed/mok/MOK.der ]; then
+         echo "-> Enrolling MOK for Secure Boot (Using OTP: 1234)..."
+         printf '1234\n1234\n' | mokutil --import /var/lib/shim-signed/mok/MOK.der || true
+         echo -e "\n========================================================"
+         echo "⚠️ SECURE BOOT MOK ENROLLMENT REQUIRED ⚠️"
+         echo "1. Upon reboot, a blue screen (MokManager) will appear."
+         echo "2. Select 'Enroll MOK' -> 'Continue'."
+         echo "3. Enter the One-Time Password: 1234"
+         echo "This is required ONCE to authorize GRUB in your Motherboard."
+         echo "========================================================"
+    elif command -v sbctl &> /dev/null; then
+         echo "-> Arch Linux 'sbctl' detected. Attempting to sign GRUB..."
+         sbctl sign -s "$efi_mount_path/EFI/$OS_NAME/grubx64.efi" || true
+    fi
+fi
 
 echo "-> Exiting chroot environment..."
 exit
