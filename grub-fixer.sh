@@ -1,6 +1,4 @@
 #!/bin/bash
-set -e # Exit immediately if a command exits with a non-zero status.
-
 # ==============================================================================
 # PROJECT: GRUB Fixer
 # AUTHOR: ahmed-x86 
@@ -23,10 +21,49 @@ set -e # Exit immediately if a command exits with a non-zero status.
 # V15: Added Universal UEFI Support (32-bit/i386-efi) with dynamic bitness detection.
 # V16: Added In-Situ (Local) Mode to repair GRUB directly from the running system without Live USB/chroot.
 # V17: Added Kernel cmdline detection for Live vs Real, and unified One-Click Confirmation prompt.
+# V18: Added CLI Flags (--version, -env l/h, -auto) for complete Zero-Interaction Automation.
 # FUTURE: Support for LUKS.
 # ==============================================================================
 
-# Start Timer for V14/V15/V16/V17
+# ==============================================================================
+# [V18] FLAG PARSING SYSTEM (Zero-Interaction Support)
+# ==============================================================================
+FORCE_ENV=""
+AUTO_CONFIRM=0
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --version|-v)
+            echo "GRUB Fixer V18"
+            exit 0
+            ;;
+        -env|--env)
+            if [[ "$2" == "l" || "$2" == "live" ]]; then
+                FORCE_ENV="live"
+                shift
+            elif [[ "$2" == "h" || "$2" == "host" ]]; then
+                FORCE_ENV="host"
+                shift
+            else
+                echo "[-] Invalid argument for -env. Use 'l' (live) or 'h' (host)."
+                exit 1
+            fi
+            ;;
+        -auto|--auto)
+            AUTO_CONFIRM=1
+            ;;
+        *)
+            echo "[-] Unknown parameter passed: $1"
+            echo "[i] Usage: $0 [--version] [-env l|h] [-auto]"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+set -e # Exit immediately if a command exits with a non-zero status.
+
+# Start Timer for V14/V15/V16/V17/V18
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -42,7 +79,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V17: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
+echo "GRUB Fixer V18: Ultimate Automation, Kernel Cmdline Detection, & Unified UX"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "=========================================="
@@ -60,19 +97,30 @@ if grep -qs ' /tmp/grub-fixer-scan' /proc/mounts; then
 fi
 
 # ==============================================================================
-# [V17] ENVIRONMENT DETECTION & UNIFIED PROMPT (Kernel Parameters + fstab)
+# [V17/V18] ENVIRONMENT DETECTION & UNIFIED PROMPT (Kernel Parameters + fstab)
 # ==============================================================================
 KERNEL_CMD=$(cat /proc/cmdline 2>/dev/null || echo "")
 IS_LIVE=0
 ENV_STR="Real Machine"
 
-# V17 Intelligence: Read kernel parameters for 100% accurate environment detection
-if [[ "$KERNEL_CMD" =~ (archiso|casper|rd\.live\.image|live-media|boot=live|isofrom|miso|cdrom|toram) ]]; then
+# V18: Respect forced environment flags if provided
+if [[ "$FORCE_ENV" == "live" ]]; then
     IS_LIVE=1
-    ENV_STR="Live Environment (USB/ISO)"
+    ENV_STR="Live Environment (Forced by Flag)"
+    echo -e "\n[*] V18 Flag Detected: Forcing Live Environment mode..."
+elif [[ "$FORCE_ENV" == "host" ]]; then
+    IS_LIVE=0
+    ENV_STR="Real Machine (Forced by Flag)"
+    echo -e "\n[*] V18 Flag Detected: Forcing Host/Real Machine mode..."
+else
+    # V17 Intelligence: Read kernel parameters for 100% accurate environment detection
+    if [[ "$KERNEL_CMD" =~ (archiso|casper|rd\.live\.image|live-media|boot=live|isofrom|miso|cdrom|toram) ]]; then
+        IS_LIVE=1
+        ENV_STR="Live Environment (USB/ISO)"
+    fi
+    echo -e "\n[*] V17 Smart Detection: Analyzed Kernel Parameters..."
 fi
 
-echo -e "\n[*] V17 Smart Detection: Analyzed Kernel Parameters..."
 echo "[*] Initializing Deep Scan for system layout..."
 
 SCAN_MNT="/tmp/grub-fixer-scan"
@@ -166,9 +214,14 @@ else
     fi
 fi
 
-# --- V17 THE UNIFIED PROMPT ---
+# --- V17/V18 THE UNIFIED PROMPT ---
 echo ""
-read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
+if [ $AUTO_CONFIRM -eq 1 ]; then
+    echo "-> [-auto FLAG ACTIVE] Automatically confirming layout for $ENV_STR..."
+    unified_ans="y"
+else
+    read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
+fi
 
 # Variables routing based on Unified Prompt
 IS_LOCAL=0
@@ -442,12 +495,17 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
             efi_ans="y"
             efi_part="$AUTO_EFI"
             
-            # [V10 Fix]: Ask where to mount EFI to catch Archinstall /boot logic
-            echo ""
-            echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
-            echo "    (If you used archinstall, it is usually /boot)"
-            read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
-            efi_mount_path=${efi_mount_path:-/boot}
+            # [V10/V18 Fix]: Handle EFI mount path silently if auto mode is on
+            if [ $AUTO_CONFIRM -eq 1 ]; then
+                efi_mount_path="/boot"
+                echo "[+] [-auto FLAG] Assuming EFI mount path: $efi_mount_path"
+            else
+                echo ""
+                echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
+                echo "    (If you used archinstall, it is usually /boot)"
+                read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
+                efi_mount_path=${efi_mount_path:-/boot}
+            fi
         else
             BOOT_MODE="legacy"
             efi_ans="n"
@@ -510,7 +568,12 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
     echo ""
     echo "[*] Custom Volumes (Optional)"
     while true; do
-        read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
+        if [ $AUTO_CONFIRM -eq 1 ]; then
+            custom_ans="n"
+        else
+            read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
+        fi
+        
         if [[ "$custom_ans" == "y" ]]; then
             read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
             if [ -b "/dev/$c_part" ]; then
