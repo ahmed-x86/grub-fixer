@@ -26,6 +26,13 @@
 # V20: Chroot Health Check - Auto-detects and installs missing GRUB/EFI packages with DNS resolv support.
 # V21: LUKS & LVM Encryption Support - Auto-detects, unlocks (visible password), and configures GRUB_ENABLE_CRYPTODISK.
 # V22: Secure Boot & Shim Integration - Auto-detects Secure Boot, handles shim-signed, and MOK Enrollment (OTP 1234).
+# V23: Security Hardening & Bug Fixes:
+#      - [SEC-1] LUKS password input is now hidden (read -s) to prevent shoulder-surfing.
+#      - [SEC-2] MOK OTP is now randomly generated (openssl) instead of hardcoded "1234".
+#      - [SEC-3] /etc/default/grub is backed up before any modification.
+#      - [BUG-1] Fixed clash with bash reserved variable $SECONDS -> renamed to $SECS_DISPLAY.
+#      - [BUG-2] efi_ans is now initialized before Tier 1 (PRO_MODE) to prevent unbound variable errors.
+#      - [BUG-3] source /mnt/etc/os-release replaced with targeted grep to avoid environment pollution.
 # ==============================================================================
 
 # ==============================================================================
@@ -37,7 +44,7 @@ AUTO_CONFIRM=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V22"
+            echo "GRUB Fixer V23"
             exit 0
             ;;
         -env|--env)
@@ -66,7 +73,7 @@ done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14-V22
+# Start Timer for V14-V23
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -82,7 +89,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V22: The Secure Boot & LUKS Encryption Update"
+echo "GRUB Fixer V23: The Security Hardening Update"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -152,9 +159,11 @@ if [ $HAS_LUKS -eq 1 ] && [ $IS_LIVE -eq 1 ]; then
                         echo "   [i] /dev/$l_part is already unlocked."
                     else
                         echo "-> Unlocking /dev/$l_part..."
-                        # V21: Visible password input as requested by user to prevent typos!
-                        read -p "   Enter LUKS Password for $l_part (Visible Input): " luks_pass </dev/tty
+                        # [V23 SEC-1] Hidden password input to prevent shoulder-surfing
+                        read -s -p "   Enter LUKS Password for $l_part: " luks_pass </dev/tty
+                        echo "" # Newline after hidden input
                         echo -n "$luks_pass" | sudo cryptsetup luksOpen "/dev/$l_part" "$mapper_name" -
+                        unset luks_pass # Clear password from memory immediately
                         if [ $? -eq 0 ]; then
                             echo "   [+] Successfully unlocked to /dev/mapper/$mapper_name"
                         else
@@ -281,6 +290,9 @@ IS_LOCAL=0
 PRO_MODE_ACCEPTED=0
 V17_CONFIRM_ANS=""
 
+# [V23 BUG-2] Initialize efi_ans early to prevent unbound variable errors in Tier 1
+efi_ans="n"
+
 if [[ "$unified_ans" == "y" || "$unified_ans" == "Y" ]]; then
     if [ $IS_LIVE -eq 0 ]; then
         IS_LOCAL=1
@@ -329,7 +341,7 @@ if [ $IS_LOCAL -eq 1 ]; then
     GRUB_CFG_PATH="/boot/grub/grub.cfg"
 
     if [ -f "/etc/os-release" ]; then
-        source /etc/os-release
+        source /etc/os-release  # Safe: sourcing local running system's own file
         OS_NAME=$NAME
         # Detect RedHat/Fedora family
         if [[ "$ID" =~ (fedora|rhel|centos|rocky|almalinux) || "$ID_LIKE" =~ (fedora|rhel|centos) ]]; then
@@ -362,7 +374,6 @@ if [ $IS_LOCAL -eq 1 ]; then
     # V22: Check for shim if Secure Boot is enabled (Debian/Ubuntu/Fedora logic)
     if [ "$SECURE_BOOT_ENABLED" -eq 1 ]; then
         if ! command -v mokutil &> /dev/null; then MISSING_PKGS+=("mokutil"); fi
-        # Attempt to detect if shim is needed, highly distro-dependent, so we warn instead of forcing.
         echo "   [i] Ensure packages like 'shim', 'shim-signed', or 'grub-efi-amd64-signed' are installed for your distro."
     fi
 
@@ -450,6 +461,13 @@ if [ $IS_LOCAL -eq 1 ]; then
         $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
     fi
     
+    # [V23 SEC-3] Backup grub config before any modification
+    if [ -f /etc/default/grub ]; then
+        GRUB_BACKUP="/etc/default/grub.bak.$(date +%s)"
+        cp /etc/default/grub "$GRUB_BACKUP"
+        echo "[+] Backed up /etc/default/grub -> $GRUB_BACKUP"
+    fi
+
     echo "-> Enabling OS Prober..."
     if [ -f /etc/default/grub ]; then
         sed -i '/GRUB_DISABLE_OS_PROBER/d' /etc/default/grub
@@ -468,18 +486,22 @@ if [ $IS_LOCAL -eq 1 ]; then
     echo "-> Generating GRUB configuration..."
     $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
     
-    # [V22] MOK Enrollment for Arch/Others if needed
+    # [V22/V23 SEC-2] MOK Enrollment with randomly generated OTP
     if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [ "$LOCAL_BOOT_MODE" == "efi" ]; then
         if command -v mokutil &> /dev/null && [ -f /var/lib/shim-signed/mok/MOK.der ]; then
-             echo "-> Enrolling MOK for Secure Boot (Using OTP: 1234)..."
-             printf '1234\n1234\n' | sudo mokutil --import /var/lib/shim-signed/mok/MOK.der || true
+             # [V23 SEC-2] Generate a random OTP instead of hardcoded "1234"
+             MOK_OTP=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+             echo "-> Enrolling MOK for Secure Boot (Using randomly generated OTP)..."
+             printf '%s\n%s\n' "$MOK_OTP" "$MOK_OTP" | sudo mokutil --import /var/lib/shim-signed/mok/MOK.der || true
              echo -e "\n========================================================"
              echo "⚠️ SECURE BOOT MOK ENROLLMENT REQUIRED ⚠️"
              echo "1. Upon reboot, a blue screen (MokManager) will appear."
              echo "2. Select 'Enroll MOK' -> 'Continue'."
-             echo "3. Enter the One-Time Password: 1234"
+             echo "3. Enter the One-Time Password: $MOK_OTP"
+             echo "   (Write this down before rebooting!)"
              echo "This is required ONCE to authorize GRUB in your Motherboard."
              echo "========================================================"
+             unset MOK_OTP
         elif command -v sbctl &> /dev/null; then
              echo "-> Arch Linux 'sbctl' detected. Attempting to sign GRUB..."
              sudo sbctl sign -s "$LOCAL_EFI_MNT/EFI/$OS_NAME/grubx64.efi" || true
@@ -488,14 +510,14 @@ if [ $IS_LOCAL -eq 1 ]; then
 
     echo -e "\n🎉 In-Situ operation successful! GRUB repaired locally ($LOCAL_BOOT_MODE mode)."
     
-    # V14 Execution Timer
+    # [V23 BUG-1] Renamed SECONDS -> SECS_DISPLAY to avoid clash with bash reserved variable
     END_TIME=$(date +%s)
     TOTAL_SECONDS=$((END_TIME - START_TIME))
     HOURS=$((TOTAL_SECONDS / 3600))
     MINUTES=$(( (TOTAL_SECONDS % 3600) / 60 ))
-    SECONDS=$((TOTAL_SECONDS % 60))
+    SECS_DISPLAY=$((TOTAL_SECONDS % 60))
 
-    echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+    echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECS_DISPLAY}s"
 
     if [ "$TOTAL_SECONDS" -lt 15 ]; then
         echo "Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"
@@ -570,9 +592,11 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
             fi
             
             # Detect if EFI from FSTAB
+            # [V23 BUG-2] efi_ans is now set here when EFI is found in fstab
             if [[ "$c_type" == "vfat" && ("$c_mnt" == "/boot" || "$c_mnt" == "/boot/efi") ]]; then
                 BOOT_MODE="efi"
                 efi_mount_path="$c_mnt"
+                efi_ans="y"
             fi
         done
         
@@ -838,18 +862,23 @@ if [ -f /etc/resolv.conf ]; then
     sudo cp /etc/resolv.conf /mnt/etc/resolv.conf || true
 fi
 
-# 7. [V19] Read the distribution name safely and map GRUB commands
+# 7. [V19/V23 BUG-3] Read target distro info using targeted grep instead of source
+# This avoids polluting the current environment with variables from the target system.
 OS_NAME="Linux"
 GRUB_INSTALL_CMD="grub-install"
 GRUB_MKCONFIG_CMD="grub-mkconfig"
 GRUB_CFG_PATH="/boot/grub/grub.cfg"
+TARGET_ID=""
+TARGET_ID_LIKE=""
 
 if [ -f "/mnt/etc/os-release" ]; then
-    source /mnt/etc/os-release
-    OS_NAME=$NAME
-    
+    OS_NAME=$(grep -m1 '^NAME=' /mnt/etc/os-release | cut -d= -f2- | tr -d '"')
+    TARGET_ID=$(grep -m1 '^ID=' /mnt/etc/os-release | cut -d= -f2- | tr -d '"')
+    TARGET_ID_LIKE=$(grep -m1 '^ID_LIKE=' /mnt/etc/os-release | cut -d= -f2- | tr -d '"')
+    OS_NAME="${OS_NAME:-Linux}"
+
     # Detect RedHat/Fedora family inside chroot
-    if [[ "$ID" =~ (fedora|rhel|centos|rocky|almalinux) || "$ID_LIKE" =~ (fedora|rhel|centos) ]]; then
+    if [[ "$TARGET_ID" =~ (fedora|rhel|centos|rocky|almalinux) || "$TARGET_ID_LIKE" =~ (fedora|rhel|centos) ]]; then
         echo "[i] RedHat/Fedora family detected for Chroot. Switching to grub2 commands."
         GRUB_INSTALL_CMD="grub2-install"
         GRUB_MKCONFIG_CMD="grub2-mkconfig"
@@ -952,6 +981,19 @@ fi
 echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
 echo "[*] Detected Boot Mode: ${BOOT_MODE^^}"
 
+# [V23 SEC-2] Generate random MOK OTP before entering chroot (if Secure Boot is active)
+MOK_OTP=""
+if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [ "$BOOT_MODE" == "efi" ]; then
+    MOK_OTP=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+fi
+
+# [V23 SEC-3] Backup grub config inside chroot before modification
+GRUB_BACKUP_CMD=""
+if sudo chroot /mnt /bin/bash -c "[ -f /etc/default/grub ]"; then
+    GRUB_BACKUP_TS=$(date +%s)
+    GRUB_BACKUP_CMD="cp /etc/default/grub /etc/default/grub.bak.${GRUB_BACKUP_TS} && echo '[+] Backed up /etc/default/grub -> /etc/default/grub.bak.${GRUB_BACKUP_TS}'"
+fi
+
 # 8. Enter chroot and execute commands automatically using EOF
 # Variables like $GRUB_INSTALL_CMD are dynamically evaluated before entering Chroot!
 sudo chroot /mnt /bin/bash <<EOF
@@ -969,7 +1011,7 @@ if [ "$BOOT_MODE" == "efi" ]; then
     echo "-> Installing for $EFI_TARGET platform (with --removable flag for VM support)..."
     
     # [V22] Shim Installation Logic
-    if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$ID" =~ (debian|ubuntu|pop) ]]; then
+    if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$TARGET_ID" =~ (debian|ubuntu|pop) ]]; then
         echo "   [i] Debian/Ubuntu based system with Secure Boot detected. Forcing UEFI Secure Boot target."
         $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --uefi-secure-boot
     else
@@ -979,6 +1021,9 @@ else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
     $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
 fi
+
+# [V23 SEC-3] Backup grub defaults before modification
+$GRUB_BACKUP_CMD
 
 echo "-> Enabling OS Prober to detect other operating systems (e.g., Windows)..."
 if [ -f /etc/default/grub ]; then
@@ -998,16 +1043,17 @@ fi
 echo "-> Generating GRUB configuration..."
 $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
 
-# [V22] MOK Enrollment for Arch/Others if needed
+# [V22/V23 SEC-2] MOK Enrollment with randomly generated OTP
 if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [ "$BOOT_MODE" == "efi" ]; then
     if command -v mokutil &> /dev/null && [ -f /var/lib/shim-signed/mok/MOK.der ]; then
-         echo "-> Enrolling MOK for Secure Boot (Using OTP: 1234)..."
-         printf '1234\n1234\n' | mokutil --import /var/lib/shim-signed/mok/MOK.der || true
+         echo "-> Enrolling MOK for Secure Boot (Using randomly generated OTP)..."
+         printf '%s\n%s\n' "$MOK_OTP" "$MOK_OTP" | mokutil --import /var/lib/shim-signed/mok/MOK.der || true
          echo -e "\n========================================================"
          echo "⚠️ SECURE BOOT MOK ENROLLMENT REQUIRED ⚠️"
          echo "1. Upon reboot, a blue screen (MokManager) will appear."
          echo "2. Select 'Enroll MOK' -> 'Continue'."
-         echo "3. Enter the One-Time Password: 1234"
+         echo "3. Enter the One-Time Password: $MOK_OTP"
+         echo "   (Write this down before rebooting!)"
          echo "This is required ONCE to authorize GRUB in your Motherboard."
          echo "========================================================"
     elif command -v sbctl &> /dev/null; then
@@ -1019,6 +1065,9 @@ fi
 echo "-> Exiting chroot environment..."
 exit
 EOF
+
+# Clear OTP from memory after chroot exits
+unset MOK_OTP
 
 # 9. Unmount and print success message
 echo -e "\n[*] Unmounting filesystems..."
@@ -1042,15 +1091,16 @@ echo -e "\n🎉 The operation was successful! GRUB bootloader has been repaired 
 echo "[i] A full log of this operation has been saved to: $LOG_FILE"
 
 # ==============================================================================
-# V14 Execution Timer & Dynamic Human Responses
+# V14/V23 Execution Timer & Dynamic Human Responses
+# [V23 BUG-1] Renamed SECONDS -> SECS_DISPLAY to avoid clash with bash reserved variable
 # ==============================================================================
 END_TIME=$(date +%s)
 TOTAL_SECONDS=$((END_TIME - START_TIME))
 HOURS=$((TOTAL_SECONDS / 3600))
 MINUTES=$(( (TOTAL_SECONDS % 3600) / 60 ))
-SECONDS=$((TOTAL_SECONDS % 60))
+SECS_DISPLAY=$((TOTAL_SECONDS % 60))
 
-echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECONDS}s"
+echo -e "\n⏱️  Execution Time: ${HOURS}h ${MINUTES}m ${SECS_DISPLAY}s"
 
 if [ "$TOTAL_SECONDS" -lt 15 ]; then
     echo "Wait, did I just fix that?! You didn't even get to sip your coffee! ☕😂🏃‍♂️"
