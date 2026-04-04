@@ -1,7 +1,6 @@
+# 🛠️ GRUB Fixer (V23 - The "Security Hardening" Update)
 
-# 🛠️ GRUB Fixer (V22 - The "Secure Boot & Shim" Update)
-
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V22** transforms the script into the ultimate recovery beast by introducing native support for **Secure Boot**, seamlessly detecting its state, bypassing signature errors with `shim`, and automating the MOK enrollment process. This builds upon the **LUKS Encryption** (V21), **Chroot Health Checks** (V20), and **Universal RedHat/Fedora Support** (V19) of previous versions.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V23** elevates the script into an ultimate, highly-secure recovery tool by introducing dynamic MOK OTP generation, hidden LUKS password inputs, and failsafe configuration backups. This builds upon the **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
 
 ## 🚀 Usage
 
@@ -10,7 +9,7 @@ Run the "Ultimate Rescue Weapon" directly from your terminal:
 ### Option 1: Quick One-Liner (Interactive Mode)
 The classic, smart, and unified interactive experience:
 ```bash
-curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash
+curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
 ```
 
 ### Option 2: Fully Automated (Zero-Interaction Mode) 💥
@@ -28,19 +27,29 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ---
 
+## 🔒 The Security Hardening Update (V23)
+
+* **Anti-Shoulder Surfing:** LUKS password input is now completely hidden (`read -s`) during the early decryption phase to protect your credentials in public or shared environments.
+* **Dynamic MOK OTP Generation:** Replaced the hardcoded Secure Boot password with a dynamically generated, 12-character random One-Time Password using `openssl`.
+* **Failsafe Config Backups:** Automatically creates a timestamped backup of `/etc/default/grub` before making any modifications to the system's boot configuration.
+* **Environment Isolation:** Uses targeted `grep` parsing instead of sourcing `/mnt/etc/os-release` to prevent host environment variable pollution during Chroot.
+* **Bash Integrity:** Resolved variable naming conflicts (`$SECONDS`) and unbound variable errors during automated Tier 1 execution.
+
+---
+
 ## 🛡️ The Secure Boot Update (V22)
 
 * **Smart State Detection:** Utilizes `mokutil --sb-state` to check if Secure Boot is enforced before attempting any GRUB installation.
 * **Dynamic Shim Routing:** Automatically forces the `--uefi-secure-boot` flag on Debian/Ubuntu systems to utilize Microsoft-signed `shim` binaries instead of standard GRUB.
 * **Arch Linux `sbctl` Integration:** Detects if Arch Linux users are utilizing custom Secure Boot keys and attempts to automatically sign the new GRUB binary using `sbctl sign`.
-* **Automated MOK Enrollment:** Imports the `MOK.der` key silently and automatically feeds a One-Time Password (OTP: **1234**) to the system, leaving the user with simple, clear instructions for their next reboot to authorize the bootloader permanently.
+* **Automated MOK Enrollment:** Imports the `MOK.der` key silently and automatically feeds the dynamically generated OTP to the system, leaving the user with simple, clear instructions for their next reboot to authorize the bootloader permanently.
 
 ---
 
 ## 🔐 The LUKS Encryption Update (V21)
 
 * **Early LUKS Detection:** Scans for `crypto_LUKS` partitions *before* the Deep Scan Engine starts, preventing scan failures on encrypted drives.
-* **Interactive Smart Decryption:** Prompts to unlock partitions using `cryptsetup` with visible password input to prevent lockouts due to typos.
+* **Interactive Smart Decryption:** Prompts to unlock partitions using `cryptsetup` to prevent lockouts.
 * **LVM Auto-Activation:** Automatically runs `vgchange -ay` to expose hidden Logical Volumes inside unlocked LUKS containers.
 * **Auto-Cryptodisk Injection:** Automatically appends `GRUB_ENABLE_CRYPTODISK=y` to `/etc/default/grub` ensuring the repaired system actually prompts for a password on boot.
 * **Secure Relocking:** Safely executes `luksClose` and deactivates volume groups after a successful repair to maintain data security.
@@ -63,9 +72,9 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ---
 
-## 🚩 V18 CLI Flags Reference
+## 🚩 CLI Flags Reference (V18)
 
-V18 introduces Command-Line Arguments to bypass prompts and enable headless automation:
+Bypass prompts and enable headless automation:
 
 * **`-env l` or `-env live`**: Force the script to assume a **Live Environment** (USB/ISO).
 * **`-env h` or `-env host`**: Force the script to assume a **Real Machine / Host** environment.
@@ -74,17 +83,9 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ---
 
-## ✨ The Intelligence Update (V17)
+## ⚙️ Evolution Registry (V12 - V17)
 
-* **Kernel Cmdline Environment Detection:** The script reads `/proc/cmdline` to differentiate between a **Live ISO** (Archiso, Casper, Miso, etc.) and a **Real Machine** installation with 100% accuracy.
-* **Deep Scan Engine:** Before asking a single question, a stealthy background scan temporarily mounts partitions to find your `/etc/fstab`, mapping your entire system layout (Root, Boot, EFI, and Btrfs subvolumes).
-* **Unified One-Click Confirmation:** No more "death by a thousand questions." The script presents the detected layout in a clean summary and asks for a single confirmation.
-* **Automatic `efivarfs` Repair:** Enhanced In-Situ logic to automatically mount `efivarfs` if the rescue environment (like Super GRUB2 Disk) fails to do so.
-
----
-
-## ⚙️ Evolution Registry (V12 - V16)
-
+* **Kernel Cmdline Detection (V17):** Reads `/proc/cmdline` to differentiate between Live ISO and Real Machine with 100% accuracy.
 * **In-Situ (Local) Repair (V16):** Allows repairing GRUB directly from the installed OS without a Live USB/Chroot environment.
 * **Universal UEFI Support (V15):** Detects 32-bit vs 64-bit UEFI architectures (`fw_platform_size`) and switches between `i386-efi` and `x86_64-efi` automatically.
 * **Gamer-Style Execution Timer (V14):** Provides human-like feedback based on speed (e.g., *"Wait, did I just fix that?! You didn't even get to sip your coffee! ☕"*).
@@ -115,9 +116,10 @@ V18 introduces Command-Line Arguments to bypass prompts and enable headless auto
 
 ## ⚠️ Disclaimer
 
-While V22 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V23 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
-**Developed with by [ahmed-x86](https://github.com/ahmed-x86)**
+**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
+
 *Arch Linux Power User | Open Source Enthusiast*
