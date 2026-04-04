@@ -33,47 +33,135 @@
 #      - [BUG-1] Fixed clash with bash reserved variable $SECONDS -> renamed to $SECS_DISPLAY.
 #      - [BUG-2] efi_ans is now initialized before Tier 1 (PRO_MODE) to prevent unbound variable errors.
 #      - [BUG-3] source /mnt/etc/os-release replaced with targeted grep to avoid environment pollution.
+# V24: The "Backend API" Update:
+#      - Added JSON Endpoints (--sys-info, --json-scan) for GUI/TUI integration.
+#      - Added Explicit Partition Mapping (--map-std, --map-btrfs) to bypass all prompts.
+#      - Fixed mkdir -p bug during fstab JSON extraction.
+#      - Script can now operate purely as a backend worker for graphical frontends.
 # ==============================================================================
 
 # ==============================================================================
-# [V18] FLAG PARSING SYSTEM (Zero-Interaction Support)
+# [V24] BACKEND API & FLAG PARSING SYSTEM
 # ==============================================================================
 FORCE_ENV=""
 AUTO_CONFIRM=0
+API_MODE=0
+API_MAP_STD=""
+API_MAP_BTRFS=""
+
+# Variables populated by API parsing
+declare -a custom_parts
+declare -a custom_mounts
+declare -a API_BTRFS_SUBVOLS
+declare -a API_BTRFS_MOUNTS
+root_part=""
+boot_part=""
+boot_ans="n"
+efi_part=""
+efi_mount_path=""
+efi_ans="n"
+BOOT_MODE="legacy"
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V23"
+            echo "GRUB Fixer V24 (API Edition)"
             exit 0
             ;;
-        -env|--env)
-            if [[ "$2" == "l" || "$2" == "live" ]]; then
-                FORCE_ENV="live"
-                shift
-            elif [[ "$2" == "h" || "$2" == "host" ]]; then
-                FORCE_ENV="host"
-                shift
-            else
-                echo "[-] Invalid argument for -env. Use 'l' (live) or 'h' (host)."
-                exit 1
+        --sys-info)
+            # [V24] GUI Endpoint: Return System Info as JSON
+            ENV_TYPE="host"
+            grep -q -E '(archiso|casper|live|miso)' /proc/cmdline 2>/dev/null && ENV_TYPE="live"
+            
+            BOOT_FIRMWARE="bios"
+            [ -d "/sys/firmware/efi" ] && BOOT_FIRMWARE="uefi"
+            
+            BAT_PCT="unknown"
+            if [ -d "/sys/class/power_supply/BAT0" ]; then
+                BAT_PCT=$(cat /sys/class/power_supply/BAT0/capacity 2>/dev/null)
+            elif [ -d "/sys/class/power_supply/BAT1" ]; then
+                BAT_PCT=$(cat /sys/class/power_supply/BAT1/capacity 2>/dev/null)
             fi
+
+            printf '{"environment": "%s", "firmware": "%s", "battery_percent": "%s"}\n' "$ENV_TYPE" "$BOOT_FIRMWARE" "$BAT_PCT"
+            exit 0
+            ;;
+        --json-scan)
+            # [V24] GUI Endpoint: Scan fstab/system and return layout as JSON (Bug Fixed)
+            JSON_OUT='{"status": "success", "partitions": ['
+            SCAN_MNT="/tmp/grub-fixer-json-scan"
+            mkdir -p "$SCAN_MNT"
+            FSTAB_FOUND=0
+            
+            if grep -q -E '(archiso|casper|live|miso)' /proc/cmdline 2>/dev/null; then
+                for part in $(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'); do
+                    if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+                        if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; break; fi
+                        umount "$SCAN_MNT" 2>/dev/null || true
+                    fi
+                done
+            else
+                if [ -f "/etc/fstab" ]; then
+                    FSTAB_FOUND=1
+                    mkdir -p "$SCAN_MNT/etc" # Fixed cp directory error
+                    cp /etc/fstab "$SCAN_MNT/etc/fstab"
+                fi
+            fi
+
+            if [ $FSTAB_FOUND -eq 1 ]; then
+                FIRST=1
+                while read -r dev mnt type opts dump pass; do
+                    [[ "$dev" =~ ^#.* || -z "$dev" || "$type" =~ ^(swap|tmpfs|proc|sysfs|none)$ ]] && continue
+                    
+                    real_dev="$dev"
+                    if [[ "$dev" == UUID=* ]]; then
+                        uuid_val=$(echo "$dev" | cut -d= -f2- | tr -d '"'); real_dev=$(blkid -U "$uuid_val" 2>/dev/null)
+                    elif [[ "$dev" == PARTUUID=* ]]; then
+                         uuid_val=$(echo "$dev" | cut -d= -f2- | tr -d '"'); real_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
+                    fi
+                    
+                    subvol=""
+                    if [[ "$type" == "btrfs" ]]; then subvol=$(echo "$opts" | grep -o 'subvol=[^,]*' | cut -d= -f2 || true); fi
+                    
+                    real_dev_name=$(basename "$real_dev" 2>/dev/null || echo "$real_dev")
+                    [ $FIRST -eq 0 ] && JSON_OUT="$JSON_OUT,"
+                    JSON_OUT="$JSON_OUT{\"device\": \"$real_dev_name\", \"mount\": \"$mnt\", \"type\": \"$type\", \"subvol\": \"$subvol\"}"
+                    FIRST=0
+                done < "$SCAN_MNT/etc/fstab"
+            fi
+            JSON_OUT="$JSON_OUT]}"
+            umount "$SCAN_MNT" 2>/dev/null || true; rm -rf "$SCAN_MNT"
+            echo "$JSON_OUT"
+            exit 0
+            ;;
+        --map-std)
+            API_MODE=1
+            API_MAP_STD="$2"
+            shift 2
+            ;;
+        --map-btrfs)
+            API_MODE=1
+            API_MAP_BTRFS="$2"
+            shift 2
+            ;;
+        -env|--env)
+            if [[ "$2" == "l" || "$2" == "live" ]]; then FORCE_ENV="live"; shift
+            elif [[ "$2" == "h" || "$2" == "host" ]]; then FORCE_ENV="host"; shift
+            else echo "[-] Invalid argument for -env."; exit 1; fi
             ;;
         -auto|--auto)
             AUTO_CONFIRM=1
             ;;
         *)
-            echo "[-] Unknown parameter passed: $1"
-            echo "[i] Usage: $0 [--version] [-env l|h] [-auto]"
+            echo "[-] Unknown parameter: $1"
             exit 1
             ;;
     esac
-    shift
 done
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
-# Start Timer for V14-V23
+# Start Timer for V14-V24
 START_TIME=$(date +%s)
 
 # --- 1. ROOT VALIDATION ---
@@ -89,7 +177,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V23: The Security Hardening Update"
+echo "GRUB Fixer V24: The Backend API Update"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -183,146 +271,180 @@ if [ $HAS_LUKS -eq 1 ] && [ $IS_LIVE -eq 1 ]; then
     fi
 fi
 
-echo -e "\n[*] Initializing Deep Scan for system layout..."
+# ==============================================================================
+# [V24] API MAPPING OVERRIDE LOGIC
+# Bypass all interactive scanning if a GUI provided a direct map.
+# ==============================================================================
+IS_LOCAL=0
+PRO_MODE_ACCEPTED=0
+V17_CONFIRM_ANS=""
 
-SCAN_MNT="/tmp/grub-fixer-scan"
-mkdir -p "$SCAN_MNT"
-FSTAB_FOUND=0
-FSTAB_PATH=""
-
-# Merge V11 intelligence (fstab parsing) at the beginning to form the unified prompt
-if [ $IS_LIVE -eq 0 ]; then
-    # If it's a real machine, read its files locally
-    if [ -f "/etc/fstab" ]; then
-        FSTAB_FOUND=1
-        FSTAB_PATH="/etc/fstab"
+if [ "$API_MODE" -eq 1 ]; then
+    echo -e "\n[*] V24 API MODE ACTIVE: Overriding manual scans with GUI provided layout..."
+    AUTO_CONFIRM=1
+    PRO_MODE_ACCEPTED=0 # Force Tier 2 layout execution without prompts
+    IS_LOCAL=0          # API assumes Chroot mode for mapped partitions
+    
+    if [ -n "$API_MAP_STD" ]; then
+        for mapping in $API_MAP_STD; do
+            dev=$(echo "$mapping" | cut -d: -f1)
+            role=$(echo "$mapping" | cut -d: -f2)
+            mnt=$(echo "$mapping" | cut -d: -f3)
+            
+            if [ "$role" == "root" ]; then root_part="$dev"
+            elif [ "$role" == "efi" ]; then efi_part="$dev"; efi_mount_path="$mnt"; efi_ans="y"; BOOT_MODE="efi"
+            elif [ "$role" == "boot" ]; then boot_part="$dev"; boot_ans="y"
+            elif [ "$role" == "ext" ]; then custom_parts+=("$dev"); custom_mounts+=("$mnt")
+            fi
+        done
+    elif [ -n "$API_MAP_BTRFS" ]; then
+        for mapping in $API_MAP_BTRFS; do
+            dev=$(echo "$mapping" | cut -d: -f1)
+            role=$(echo "$mapping" | cut -d: -f2)
+            
+            if [ "$role" == "efi" ]; then 
+                efi_part="$dev"
+                efi_mount_path=$(echo "$mapping" | cut -d: -f3)
+                efi_ans="y"
+                BOOT_MODE="efi"
+            elif [ "$role" == "root" ]; then 
+                root_part="$dev"
+                subvols_raw=$(echo "$mapping" | cut -d: -f3) # e.g. "/=@,/home=@home"
+                IFS=',' read -ra SUB_ARRAY <<< "$subvols_raw"
+                for sub in "${SUB_ARRAY[@]}"; do
+                    API_BTRFS_MOUNTS+=("$(echo "$sub" | cut -d= -f1)")
+                    API_BTRFS_SUBVOLS+=("$(echo "$sub" | cut -d= -f2)")
+                done
+            fi
+        done
     fi
 else
-    # 1. Try finding Btrfs Root (@ or @root)
-    for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="btrfs" {print $1}'); do
-        if mount -o ro,subvol=@ "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
-            umount "$SCAN_MNT" 2>/dev/null || true
-        fi
-        if mount -o ro,subvol=@root "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
-            umount "$SCAN_MNT" 2>/dev/null || true
-        fi
-        if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
-            if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
-            umount "$SCAN_MNT" 2>/dev/null || true
-        fi
-    done
+    # --- STANDARD INTERACTIVE SCAN & PROMPT ---
+    echo -e "\n[*] Initializing Deep Scan for system layout..."
 
-    # 2. If no Btrfs, try ext4/xfs sorted by size
-    if [ $FSTAB_FOUND -eq 0 ]; then
-        for part in $(lsblk -l -b -o NAME,FSTYPE,SIZE | awk '$2~/(ext4|xfs)/ {print $0}' | sort -k3 -nr | awk '{print $1}'); do
+    SCAN_MNT="/tmp/grub-fixer-scan"
+    mkdir -p "$SCAN_MNT"
+    FSTAB_FOUND=0
+    FSTAB_PATH=""
+
+    if [ $IS_LIVE -eq 0 ]; then
+        if [ -f "/etc/fstab" ]; then
+            FSTAB_FOUND=1
+            FSTAB_PATH="/etc/fstab"
+        fi
+    else
+        for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="btrfs" {print $1}'); do
+            if mount -o ro,subvol=@ "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+                if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+                umount "$SCAN_MNT" 2>/dev/null || true
+            fi
+            if mount -o ro,subvol=@root "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+                if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+                umount "$SCAN_MNT" 2>/dev/null || true
+            fi
             if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
                 if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
                 umount "$SCAN_MNT" 2>/dev/null || true
             fi
         done
-    fi
-fi
 
-declare -a FSTAB_DEVS FSTAB_MNTS FSTAB_TYPES FSTAB_OPTS
-if [ $FSTAB_FOUND -eq 1 ]; then
-    echo -e "\n=== Detected System Layout (From fstab) ==="
-    while read -r dev mnt type opts dump pass; do
-        [[ "$dev" =~ ^#.* ]] && continue
-        [[ -z "$dev" ]] && continue
-        [[ "$type" =~ ^(swap|tmpfs|proc|sysfs|devtmpfs|devpts|efivarfs|cdrom)$ ]] && continue
-        [[ "$mnt" == "none" ]] && continue
-
-        real_dev="$dev"
-        if [[ "$dev" == UUID=* ]]; then
-            uuid_val="${dev#UUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
-            found_dev=$(blkid -U "$uuid_val" 2>/dev/null)
-            [ -n "$found_dev" ] && real_dev="$found_dev"
-        elif [[ "$dev" == PARTUUID=* ]]; then
-             uuid_val="${dev#PARTUUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
-             found_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
-             [ -n "$found_dev" ] && real_dev="$found_dev"
+        if [ $FSTAB_FOUND -eq 0 ]; then
+            for part in $(lsblk -l -b -o NAME,FSTYPE,SIZE | awk '$2~/(ext4|xfs)/ {print $0}' | sort -k3 -nr | awk '{print $1}'); do
+                if mount -o ro "/dev/$part" "$SCAN_MNT" 2>/dev/null; then
+                    if [ -f "$SCAN_MNT/etc/fstab" ]; then FSTAB_FOUND=1; FSTAB_PATH="$SCAN_MNT/etc/fstab"; break; fi
+                    umount "$SCAN_MNT" 2>/dev/null || true
+                fi
+            done
         fi
+    fi
 
-        FSTAB_DEVS+=("$real_dev")
-        FSTAB_MNTS+=("$mnt")
-        FSTAB_TYPES+=("$type")
-        FSTAB_OPTS+=("$opts")
+    declare -a FSTAB_DEVS FSTAB_MNTS FSTAB_TYPES FSTAB_OPTS
+    if [ $FSTAB_FOUND -eq 1 ]; then
+        echo -e "\n=== Detected System Layout (From fstab) ==="
+        while read -r dev mnt type opts dump pass; do
+            [[ "$dev" =~ ^#.* ]] && continue
+            [[ -z "$dev" ]] && continue
+            [[ "$type" =~ ^(swap|tmpfs|proc|sysfs|devtmpfs|devpts|efivarfs|cdrom)$ ]] && continue
+            [[ "$mnt" == "none" ]] && continue
+
+            real_dev="$dev"
+            if [[ "$dev" == UUID=* ]]; then
+                uuid_val="${dev#UUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+                found_dev=$(blkid -U "$uuid_val" 2>/dev/null)
+                [ -n "$found_dev" ] && real_dev="$found_dev"
+            elif [[ "$dev" == PARTUUID=* ]]; then
+                 uuid_val="${dev#PARTUUID=}"; uuid_val="${uuid_val%\"}"; uuid_val="${uuid_val#\"}"
+                 found_dev=$(blkid -t PARTUUID="$uuid_val" -o device 2>/dev/null | head -n1)
+                 [ -n "$found_dev" ] && real_dev="$found_dev"
+            fi
+
+            FSTAB_DEVS+=("$real_dev")
+            FSTAB_MNTS+=("$mnt")
+            FSTAB_TYPES+=("$type")
+            FSTAB_OPTS+=("$opts")
+            
+            if [[ "$type" == "btrfs" ]]; then
+                subvol_info=$(echo "$opts" | grep -o 'subvol=[^,]*' || true)
+                echo "  -> Mount: $mnt | Device: $real_dev ($type, $subvol_info)"
+            else
+                echo "  -> Mount: $mnt | Device: $real_dev ($type)"
+            fi
+        done < "$FSTAB_PATH"
+        echo "==========================================="
         
-        if [[ "$type" == "btrfs" ]]; then
-            subvol_info=$(echo "$opts" | grep -o 'subvol=[^,]*' || true)
-            echo "  -> Mount: $mnt | Device: $real_dev ($type, $subvol_info)"
-        else
-            echo "  -> Mount: $mnt | Device: $real_dev ($type)"
+        if [ "$FSTAB_PATH" == "$SCAN_MNT/etc/fstab" ]; then
+            umount "$SCAN_MNT" 2>/dev/null || true
+            rm -rf "$SCAN_MNT"
         fi
-    done < "$FSTAB_PATH"
-    echo "==========================================="
-    
-    if [ "$FSTAB_PATH" == "$SCAN_MNT/etc/fstab" ]; then
-        umount "$SCAN_MNT" 2>/dev/null || true
-        rm -rf "$SCAN_MNT"
-    fi
-else
-    # V6/V10 Fallback Auto-Detection if fstab is completely missing
-    echo -e "\n=== Basic Auto-Detection Proposal ==="
-    AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
-    SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
-    if [ -n "$SUGGESTED_ROOT" ]; then echo "  Root (/)        : /dev/$SUGGESTED_ROOT"; else echo "  Root (/)        : [NOT FOUND]"; fi
-    echo "====================================="
-    if [ $IS_LIVE -eq 1 ]; then
-        umount "$SCAN_MNT" 2>/dev/null || true
-        rm -rf "$SCAN_MNT"
-    fi
-fi
-
-# --- V17/V18 THE UNIFIED PROMPT ---
-echo ""
-if [ $AUTO_CONFIRM -eq 1 ]; then
-    echo "-> [-auto FLAG ACTIVE] Automatically confirming layout for $ENV_STR..."
-    unified_ans="y"
-else
-    read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
-fi
-
-# Variables routing based on Unified Prompt
-IS_LOCAL=0
-PRO_MODE_ACCEPTED=0
-V17_CONFIRM_ANS=""
-
-# [V23 BUG-2] Initialize efi_ans early to prevent unbound variable errors in Tier 1
-efi_ans="n"
-
-if [[ "$unified_ans" == "y" || "$unified_ans" == "Y" ]]; then
-    if [ $IS_LIVE -eq 0 ]; then
-        IS_LOCAL=1
-        PRO_MODE_ACCEPTED=0 # Because In-Situ executes immediately without fstab mounting
     else
-        IS_LOCAL=0
-        if [ $FSTAB_FOUND -eq 1 ]; then
-            PRO_MODE_ACCEPTED=1 # Triggers Tier 1 execution
-        else
+        echo -e "\n=== Basic Auto-Detection Proposal ==="
+        AUTO_ROOTS=($(lsblk -l -o NAME,FSTYPE | awk '$2~/(ext4|btrfs|xfs)/ {print $1}'))
+        SUGGESTED_ROOT="${AUTO_ROOTS[0]}"
+        if [ -n "$SUGGESTED_ROOT" ]; then echo "  Root (/)        : /dev/$SUGGESTED_ROOT"; else echo "  Root (/)        : [NOT FOUND]"; fi
+        echo "====================================="
+        if [ $IS_LIVE -eq 1 ]; then
+            umount "$SCAN_MNT" 2>/dev/null || true
+            rm -rf "$SCAN_MNT"
+        fi
+    fi
+
+    echo ""
+    if [ $AUTO_CONFIRM -eq 1 ]; then
+        echo "-> [-auto FLAG ACTIVE] Automatically confirming layout for $ENV_STR..."
+        unified_ans="y"
+    else
+        read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
+    fi
+
+    if [[ "$unified_ans" == "y" || "$unified_ans" == "Y" ]]; then
+        if [ $IS_LIVE -eq 0 ]; then
+            IS_LOCAL=1
             PRO_MODE_ACCEPTED=0
-            V17_CONFIRM_ANS="y" # Triggers Tier 2 execution silently
+        else
+            IS_LOCAL=0
+            if [ $FSTAB_FOUND -eq 1 ]; then
+                PRO_MODE_ACCEPTED=1
+            else
+                PRO_MODE_ACCEPTED=0
+                V17_CONFIRM_ANS="y"
+            fi
         fi
-    fi
-else
-    echo "[-] You selected 'n'. System will ask for clarification..."
-    # Second question in case of rejection
-    read -p "-> Are you using a Live Environment (L) or a Real Machine (R)? (L/R): " env_ans </dev/tty
-    if [[ "$env_ans" == "L" || "$env_ans" == "l" ]]; then
-        IS_LIVE=1
-        IS_LOCAL=0
-        echo "[*] Proceeding as Live USB (Manual Partition Selection)..."
     else
-        IS_LIVE=0
-        IS_LOCAL=1
-        echo "[*] Proceeding as Real Machine (Local Repair)..."
+        echo "[-] You selected 'n'. System will ask for clarification..."
+        read -p "-> Are you using a Live Environment (L) or a Real Machine (R)? (L/R): " env_ans </dev/tty
+        if [[ "$env_ans" == "L" || "$env_ans" == "l" ]]; then
+            IS_LIVE=1
+            IS_LOCAL=0
+            echo "[*] Proceeding as Live USB (Manual Partition Selection)..."
+        else
+            IS_LIVE=0
+            IS_LOCAL=1
+            echo "[*] Proceeding as Real Machine (Local Repair)..."
+        fi
+        PRO_MODE_ACCEPTED=0
+        V17_CONFIRM_ANS="n"
     fi
-    PRO_MODE_ACCEPTED=0
-    V17_CONFIRM_ANS="n"
 fi
-
 
 # ==============================================================================
 # [V16] IN-SITU (LOCAL) MODE DETECTION & EXECUTION
@@ -531,11 +653,6 @@ if [ $IS_LOCAL -eq 1 ]; then
     exit 0 
 fi
 
-# Variables for V12 Legacy support
-BOOT_MODE="legacy" # Default to legacy until proven it's EFI
-efi_mount_path=""
-root_part=""
-
 # ==============================================================================
 # EXECUTION: TIER 1 (PRO FSTAB)
 # ==============================================================================
@@ -611,146 +728,134 @@ fi
 # TIER 2 & 3: FALLBACK TO V10 LOGIC (Auto-Detect / Manual)
 # ==============================================================================
 if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
-    echo -e "\n[*] Scanning partitions for Smart Auto-Detection..."
+    if [ "$API_MODE" -eq 0 ]; then
+        echo -e "\n[*] Scanning partitions for Smart Auto-Detection..."
 
-    # --- 4. SMART AUTO DETECTION LOGIC ---
+        # Smart Detect EFI Partition: Mount vfat partitions temporarily to check for /EFI directory
+        AUTO_EFI=""
+        TMP_EFI_MNT="/tmp/grub-fixer-efi-check"
+        mkdir -p "$TMP_EFI_MNT"
 
-    # Smart Detect EFI Partition: Mount vfat partitions temporarily to check for /EFI directory
-    AUTO_EFI=""
-    TMP_EFI_MNT="/tmp/grub-fixer-efi-check"
-    mkdir -p "$TMP_EFI_MNT"
-
-    for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}'); do
-        # Try mounting read-only silently
-        if mount -o ro /dev/$part "$TMP_EFI_MNT" 2>/dev/null; then
-            if [ -d "$TMP_EFI_MNT/EFI" ]; then
-                AUTO_EFI="$part"
+        for part in $(lsblk -l -o NAME,FSTYPE | awk '$2=="vfat" {print $1}'); do
+            if mount -o ro /dev/$part "$TMP_EFI_MNT" 2>/dev/null; then
+                if [ -d "$TMP_EFI_MNT/EFI" ]; then
+                    AUTO_EFI="$part"
+                    umount "$TMP_EFI_MNT" 2>/dev/null || true
+                    break 
+                fi
                 umount "$TMP_EFI_MNT" 2>/dev/null || true
-                break # Found the real EFI partition, stop searching
-            fi
-            umount "$TMP_EFI_MNT" 2>/dev/null || true
-        fi
-    done
-    rm -rf "$TMP_EFI_MNT"
-
-    if [ "$V17_CONFIRM_ANS" == "y" ]; then
-        confirm_ans="y"
-        echo "[+] Using accepted basic auto-detection..."
-    elif [ "$V17_CONFIRM_ANS" == "n" ]; then
-        confirm_ans="n"
-    else
-        read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
-    fi
-
-    if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
-        # --- ACCEPTED AUTO-DETECTION ---
-        echo "[+] Proceeding with Auto-Detected partitions..."
-        root_part="$SUGGESTED_ROOT"
-        
-        if [ -n "$AUTO_EFI" ]; then
-            BOOT_MODE="efi"
-            efi_ans="y"
-            efi_part="$AUTO_EFI"
-            
-            # [V10/V18 Fix]: Handle EFI mount path silently if auto mode is on
-            if [ $AUTO_CONFIRM -eq 1 ]; then
-                efi_mount_path="/boot"
-                echo "[+] [-auto FLAG] Assuming EFI mount path: $efi_mount_path"
-            else
-                echo ""
-                echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
-                echo "    (If you used archinstall, it is usually /boot)"
-                read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
-                efi_mount_path=${efi_mount_path:-/boot}
-            fi
-        else
-            BOOT_MODE="legacy"
-            efi_ans="n"
-        fi
-        
-        boot_ans="n" # We assume no separate /boot if they accepted this basic layout
-        
-    else
-        # --- FALLBACK: MANUAL INPUT ---
-        echo "[-] Falling back to Manual Input..."
-        echo ""
-        
-        # Root partition is REQUIRED
-        echo "[*] Root partition is REQUIRED to repair the system."
-        while true; do
-            read -p "What is the Root (/) partition name? (e.g., vda3 or mapper/crypt_vda3): " root_part </dev/tty
-            if [ -b "/dev/$root_part" ]; then
-                break
-            else
-                echo "[-] Error: Partition '/dev/$root_part' does not exist. Please check lsblk and try again."
             fi
         done
+        rm -rf "$TMP_EFI_MNT"
 
-        read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
-        if [ "$efi_ans" == "y" ]; then
-            BOOT_MODE="efi"
-            while true; do
-                read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
-                if [ -b "/dev/$efi_part" ]; then
-                    # [V10 Fix]: Ask where to mount EFI in manual mode too
-                    read -p "-> Where should it be mounted? (e.g., /boot or /boot/efi) [default: /boot/efi]: " efi_mount_path </dev/tty
-                    efi_mount_path=${efi_mount_path:-/boot/efi}
-                    break 
-                else
-                    echo "[-] Error: Partition '/dev/$efi_part' does not exist. Please check lsblk and try again."
-                fi
-            done
+        if [ "$V17_CONFIRM_ANS" == "y" ]; then
+            confirm_ans="y"
+            echo "[+] Using accepted basic auto-detection..."
+        elif [ "$V17_CONFIRM_ANS" == "n" ]; then
+            confirm_ans="n"
         else
-            echo "[*] No EFI selected. Assuming Legacy BIOS."
-            BOOT_MODE="legacy"
+            read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
         fi
 
-        read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
-        if [ "$boot_ans" == "y" ]; then
-            while true; do
-                read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
-                if [ -b "/dev/$boot_part" ]; then
-                    break
-                else
-                    echo "[-] Error: Partition '/dev/$boot_part' does not exist. Please try again."
-                fi
-            done
-        fi
-    fi
-
-    # --- CUSTOM VOLUMES LOGIC (Non-Btrfs external partitions) ---
-    declare -a custom_parts
-    declare -a custom_mounts
-
-    echo ""
-    echo "[*] Custom Volumes (Optional)"
-    while true; do
-        if [ $AUTO_CONFIRM -eq 1 ]; then
-            custom_ans="n"
-        else
-            read -p "Do you want to mount any other partitions? (e.g., external /home on another disk) (y/n): " custom_ans </dev/tty
-        fi
-        
-        if [[ "$custom_ans" == "y" ]]; then
-            read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
-            if [ -b "/dev/$c_part" ]; then
-                read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
+        if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
+            # --- ACCEPTED AUTO-DETECTION ---
+            echo "[+] Proceeding with Auto-Detected partitions..."
+            root_part="$SUGGESTED_ROOT"
+            
+            if [ -n "$AUTO_EFI" ]; then
+                BOOT_MODE="efi"
+                efi_ans="y"
+                efi_part="$AUTO_EFI"
                 
-                # Ensure the mount point starts with /
-                if [[ "$c_mount" == /* ]]; then
-                    custom_parts+=("$c_part")
-                    custom_mounts+=("$c_mount")
-                    echo "  [+] Added: /dev/$c_part will be mounted at /mnt$c_mount"
+                if [ $AUTO_CONFIRM -eq 1 ]; then
+                    efi_mount_path="/boot"
+                    echo "[+] [-auto FLAG] Assuming EFI mount path: $efi_mount_path"
                 else
-                    echo "  [-] Error: Mount point must start with '/' (e.g., /var). Try again."
+                    echo ""
+                    echo "[?] IMPORTANT: Where does your system mount the EFI partition?"
+                    read -p "-> Enter mount path (e.g., /boot or /boot/efi) [default: /boot]: " efi_mount_path </dev/tty
+                    efi_mount_path=${efi_mount_path:-/boot}
                 fi
             else
-                echo "  [-] Error: Partition '/dev/$c_part' does not exist. Try again."
+                BOOT_MODE="legacy"
+                efi_ans="n"
             fi
+            
+            boot_ans="n"
         else
-            break
+            # --- FALLBACK: MANUAL INPUT ---
+            echo "[-] Falling back to Manual Input..."
+            echo ""
+            
+            echo "[*] Root partition is REQUIRED to repair the system."
+            while true; do
+                read -p "What is the Root (/) partition name? (e.g., vda3): " root_part </dev/tty
+                if [ -b "/dev/$root_part" ]; then
+                    break
+                else
+                    echo "[-] Error: Partition '/dev/$root_part' does not exist."
+                fi
+            done
+
+            read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
+            if [ "$efi_ans" == "y" ]; then
+                BOOT_MODE="efi"
+                while true; do
+                    read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
+                    if [ -b "/dev/$efi_part" ]; then
+                        read -p "-> Where should it be mounted? [default: /boot/efi]: " efi_mount_path </dev/tty
+                        efi_mount_path=${efi_mount_path:-/boot/efi}
+                        break 
+                    else
+                        echo "[-] Error: Partition '/dev/$efi_part' does not exist."
+                    fi
+                done
+            else
+                echo "[*] No EFI selected. Assuming Legacy BIOS."
+                BOOT_MODE="legacy"
+            fi
+
+            read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
+            if [ "$boot_ans" == "y" ]; then
+                while true; do
+                    read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
+                    if [ -b "/dev/$boot_part" ]; then
+                        break
+                    else
+                        echo "[-] Error: Partition '/dev/$boot_part' does not exist."
+                    fi
+                done
+            fi
         fi
-    done
+
+        echo ""
+        echo "[*] Custom Volumes (Optional)"
+        while true; do
+            if [ $AUTO_CONFIRM -eq 1 ]; then
+                custom_ans="n"
+            else
+                read -p "Do you want to mount any other partitions? (e.g., external /home) (y/n): " custom_ans </dev/tty
+            fi
+            
+            if [[ "$custom_ans" == "y" ]]; then
+                read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
+                if [ -b "/dev/$c_part" ]; then
+                    read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
+                    if [[ "$c_mount" == /* ]]; then
+                        custom_parts+=("$c_part")
+                        custom_mounts+=("$c_mount")
+                        echo "  [+] Added: /dev/$c_part will be mounted at /mnt$c_mount"
+                    else
+                        echo "  [-] Error: Mount point must start with '/' (e.g., /var). Try again."
+                    fi
+                else
+                    echo "  [-] Error: Partition '/dev/$c_part' does not exist. Try again."
+                fi
+            else
+                break
+            fi
+        done
+    fi # End of Interactive input
 
     echo -e "\n[*] Executing Mount commands..."
 
@@ -761,33 +866,34 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
     fi
 
     # --- 5. BTRFS & ROOT MOUNT LOGIC ---
-    ROOT_FSTYPE=$(lsblk -n -o FSTYPE "/dev/$root_part" | head -n 1)
+    ROOT_FSTYPE=""
+    [ -n "$root_part" ] && ROOT_FSTYPE=$(lsblk -n -o FSTYPE "/dev/$root_part" | head -n 1)
 
-    if [ "$ROOT_FSTYPE" == "btrfs" ]; then
+    if [ "$API_MODE" -eq 1 ] && [ -n "$API_MAP_BTRFS" ]; then
+        echo "[*] V24 API MODE: Executing GUI Provided Btrfs Mounts..."
+        for i in "${!API_BTRFS_MOUNTS[@]}"; do
+            mnt_point="${API_BTRFS_MOUNTS[$i]}"
+            subvol="${API_BTRFS_SUBVOLS[$i]}"
+            if [ "$mnt_point" == "/" ]; then TARGET_MNT="/mnt"; else TARGET_MNT="/mnt$mnt_point"; fi
+            
+            echo "   [+] Mounting subvol '$subvol' to '$TARGET_MNT'..."
+            sudo mkdir -p "$TARGET_MNT"
+            sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
+        done
+    elif [ "$ROOT_FSTYPE" == "btrfs" ]; then
         echo -e "\n[*] Btrfs Filesystem Detected on /dev/$root_part!"
         echo "[i] Please enter your subvolumes and their mount points (separated by a space)."
-        echo "    Examples:  @ /"
-        echo "               @home /home"
-        echo "               @log /var/log"
-        echo ""
         
         while true; do
             read -p "-> Enter subvolume and mount point: " subvol mnt_point </dev/tty
             
-            # Validate input
             if [ -z "$subvol" ] || [ -z "$mnt_point" ]; then
                 echo "[-] Error: You must enter BOTH the subvolume and the mount point. Try again."
                 continue
             fi
             
-            # Smart routing: If mount point is exactly '/', it goes to '/mnt'
-            if [ "$mnt_point" == "/" ]; then
-                TARGET_MNT="/mnt"
-            else
-                # Ensure custom mount points start with '/'
-                if [[ "$mnt_point" != /* ]]; then
-                    mnt_point="/$mnt_point"
-                fi
+            if [ "$mnt_point" == "/" ]; then TARGET_MNT="/mnt"; else
+                if [[ "$mnt_point" != /* ]]; then mnt_point="/$mnt_point"; fi
                 TARGET_MNT="/mnt$mnt_point"
             fi
             
@@ -795,24 +901,16 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
             sudo mkdir -p "$TARGET_MNT"
             sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
             
-            # Ask if there are more subvolumes - [V10 Fix]: Bulletproof loop
             while true; do
                 read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
                 more_btrfs=$(echo "$more_btrfs" | tr '[:upper:]' '[:lower:]')
-                
-                if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then
-                    break
-                else
+                if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then break; else
                     echo "   [-] Invalid input. Please type 'y' for YES or 'n' for NO."
                 fi
             done
-            
-            if [ "$more_btrfs" == "n" ]; then
-                break
-            fi
+            if [ "$more_btrfs" == "n" ]; then break; fi
         done
     else
-        # Standard mount for ext4, xfs, etc.
         echo "-> Mounting Standard Root Partition (/dev/$root_part)..."
         sudo mount "/dev/$root_part" /mnt
     fi
@@ -821,14 +919,14 @@ if [ $PRO_MODE_ACCEPTED -eq 0 ]; then
     if [ "$boot_ans" == "y" ]; then
         echo "-> Mounting Boot Partition (/dev/$boot_part)..."
         sudo mkdir -p /mnt/boot
-        sudo mount /dev/$boot_part /mnt/boot
+        sudo mount "/dev/$boot_part" /mnt/boot
     fi
 
-    # Mount EFI (Dynamic path based on user input for V10)
+    # Mount EFI
     if [ "$efi_ans" == "y" ]; then
         echo "-> Mounting EFI Partition (/dev/$efi_part) to /mnt$efi_mount_path..."
         sudo mkdir -p "/mnt$efi_mount_path"
-        sudo mount /dev/$efi_part "/mnt$efi_mount_path"
+        sudo mount "/dev/$efi_part" "/mnt$efi_mount_path"
     fi
 
     # Mount Custom Partitions
