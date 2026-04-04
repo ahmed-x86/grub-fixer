@@ -1,6 +1,6 @@
-# 🛠️ GRUB Fixer (V23 - The "Security Hardening" Update)
+# 🛠️ GRUB Fixer (V24 - The "Backend API" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V23** elevates the script into an ultimate, highly-secure recovery tool by introducing dynamic MOK OTP generation, hidden LUKS password inputs, and failsafe configuration backups. This builds upon the **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V24** evolves the script beyond a terminal tool into a fully-fledged **Backend API**, capable of seamlessly driving graphical user interfaces (GUIs) with JSON outputs and explicit execution mapping. This builds upon the **Security Hardening** (V23), **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
 
 ## 🚀 Usage
 
@@ -15,15 +15,25 @@ curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.
 ### Option 2: Fully Automated (Zero-Interaction Mode) 💥
 Skip all questions and let the script fix GRUB silently based on auto-detection (perfect for Live USBs):
 ```bash
-curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash -s -- -env l -auto
+curl -sL [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh) | sudo bash -s -- -env l -auto
 ```
 
 ### Option 3: Manual Download
 ```bash
-curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
+curl -O [https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh](https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh)
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh [FLAGS]
 ```
+
+---
+
+## 🔌 The Backend API Update (V24)
+
+* **JSON Endpoints for GUIs:** Designed to be the brain behind graphical interfaces. Passing `--sys-info` returns live system state (environment, firmware, battery), and `--json-scan` silently parses `fstab` to output a clean JSON array of the detected partition layout.
+* **Explicit Execution Mapping:** Bypasses all interactive logic and deep scans when explicitly instructed by a frontend GUI.
+* **Standard Mapping (`--map-std`):** Accepts structured payloads for Ext4/XFS layouts (e.g., `vda1:efi:/boot/efi vda2:root:/ vda3:ext:/mnt/data`).
+* **Btrfs Subvolume Mapping (`--map-btrfs`):** Handles complex Btrfs layouts seamlessly (e.g., `nvme0n1p1:efi:/boot nvme0n1p2:root:/=@,/home=@home`).
+* **Headless Worker:** Operates flawlessly in the background, executing precise mounts, LUKS unlocks, and GRUB repairs based purely on GUI-provided data strings.
 
 ---
 
@@ -72,10 +82,14 @@ sudo ./grub-fixer.sh [FLAGS]
 
 ---
 
-## 🚩 CLI Flags Reference (V18)
+## 🚩 CLI Flags & API Reference
 
-Bypass prompts and enable headless automation:
+Bypass prompts, enable headless automation, or integrate with graphical frontends:
 
+* **`--sys-info`**: Return basic system information (environment type, firmware, battery) as JSON.
+* **`--json-scan`**: Perform a stealth scan and output the detected partition/fstab layout as a JSON array.
+* **`--map-std "<mapping>"`**: Provide an explicit partition layout for standard filesystems (e.g., `--map-std "sda1:efi:/boot sda2:root:/"`).
+* **`--map-btrfs "<mapping>"`**: Provide an explicit partition layout for Btrfs setups with subvolumes.
 * **`-env l` or `-env live`**: Force the script to assume a **Live Environment** (USB/ISO).
 * **`-env h` or `-env host`**: Force the script to assume a **Real Machine / Host** environment.
 * **`-auto`**: The "Ultimate Mode" flag. Bypasses all confirmation prompts `(y/n)`, automatically assumes default mount points (like `/boot` for EFI), and executes the repair instantly.
@@ -116,11 +130,11 @@ Bypass prompts and enable headless automation:
 
 ## ⚠️ Disclaimer
 
-While V23 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V24 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
-**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
-
-
+**Developed with ❤️ by [ahmed-x86](https://github.com/ahmed-x86)**
 *Arch Linux Power User | Open Source Enthusiast*
+
+
