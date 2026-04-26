@@ -38,6 +38,9 @@
 #      - Added Explicit Partition Mapping (--map-std, --map-btrfs) to bypass all prompts.
 #      - Fixed mkdir -p bug during fstab JSON extraction.
 #      - Script can now operate purely as a backend worker for graphical frontends.
+# V25: The Polishing Update:
+#      - [BUG-1] Fixed Legacy BIOS + Btrfs crash on VMs (VirtIO) by adding Regex fallback for Target Disk extraction.
+#      - [BUG-2] Fixed empty subvolume mount crash in fstab parser (Tier 1).
 # ==============================================================================
 
 # ==============================================================================
@@ -65,7 +68,7 @@ BOOT_MODE="legacy"
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V24 (API Edition)"
+            echo "GRUB Fixer V25 (The Polishing Update)"
             exit 0
             ;;
         --sys-info)
@@ -177,7 +180,7 @@ echo "[*] Logging all operations to $LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================="
-echo "GRUB Fixer V24: The Backend API Update"
+echo "GRUB Fixer V25: The Polishing Update"
 echo "Date: $(date)"
 echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
 echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
@@ -533,7 +536,7 @@ if [ $IS_LOCAL -eq 1 ]; then
         # Find the physical disk of the root partition dynamically
         ROOT_DEV=$(findmnt -n -o SOURCE / | head -n 1)
         
-        # [V21] Smarter Parent Disk Extraction for nested LUKS/LVM in Legacy Mode
+        # [V21/V25] Smarter Parent Disk Extraction for nested LUKS/LVM in Legacy Mode
         PARENT_1=$(lsblk -no PKNAME "$ROOT_DEV" | head -n 1)
         PARENT_2=$(lsblk -no PKNAME "/dev/$PARENT_1" 2>/dev/null | head -n 1)
         
@@ -543,6 +546,12 @@ if [ $IS_LOCAL -eq 1 ]; then
             TARGET_DISK="/dev/$PARENT_1"
         else
             TARGET_DISK="$ROOT_DEV"
+            # [V25] Regex fallback for VMs/VirtIO where lsblk PKNAME topology fails
+            if [[ "$TARGET_DISK" =~ ^(/dev/[a-zA-Z]+)[0-9]+$ ]]; then
+                TARGET_DISK="${BASH_REMATCH[1]}"
+            elif [[ "$TARGET_DISK" =~ ^(/dev/(nvme[0-9]+n[0-9]+|mmcblk[0-9]+))p[0-9]+$ ]]; then
+                TARGET_DISK="${BASH_REMATCH[1]}"
+            fi
         fi
     fi
 
@@ -676,7 +685,12 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
         echo "   [+] Mounting Root (/) -> $r_dev"
         if [[ "$r_type" == "btrfs" ]]; then
             r_subvol=$(echo "$r_opts" | grep -o 'subvol=[^,]*' | cut -d= -f2 || true)
-            sudo mount -o subvol="$r_subvol" "$r_dev" /mnt
+            # [V25] Check if subvol is empty to prevent mount crash
+            if [ -n "$r_subvol" ]; then
+                sudo mount -o subvol="$r_subvol" "$r_dev" /mnt
+            else
+                sudo mount "$r_dev" /mnt
+            fi
         else
             sudo mount "$r_dev" /mnt
         fi
@@ -703,7 +717,12 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
             sudo mkdir -p "/mnt$c_mnt"
             if [[ "$c_type" == "btrfs" ]]; then
                 c_subvol=$(echo "$c_opts" | grep -o 'subvol=[^,]*' | cut -d= -f2 || true)
-                sudo mount -o subvol="$c_subvol" "$c_dev" "/mnt$c_mnt"
+                # [V25] Check if subvol is empty to prevent mount crash
+                if [ -n "$c_subvol" ]; then
+                    sudo mount -o subvol="$c_subvol" "$c_dev" "/mnt$c_mnt"
+                else
+                    sudo mount "$c_dev" "/mnt$c_mnt"
+                fi
             else
                 sudo mount "$c_dev" "/mnt$c_mnt"
             fi
@@ -717,7 +736,7 @@ if [ $PRO_MODE_ACCEPTED -eq 1 ]; then
             fi
         done
         
-        # If FSTAB didn't have explicitly vfat /boot or /boot/efi but EFI is needed, we set a default
+        # If FSTAB didnt have explicitly vfat /boot or /boot/efi but EFI is needed, we set a default
         if [ -z "$efi_mount_path" ]; then
             efi_mount_path="/boot/efi" 
         fi
@@ -1054,6 +1073,12 @@ elif [ -n "$PARENT_1" ]; then
     TARGET_DISK="/dev/$PARENT_1"
 else
     TARGET_DISK="/dev/$root_part"
+    # [V25] Regex fallback for VMs/VirtIO where lsblk PKNAME topology fails
+    if [[ "$TARGET_DISK" =~ ^(/dev/[a-zA-Z]+)[0-9]+$ ]]; then
+        TARGET_DISK="${BASH_REMATCH[1]}"
+    elif [[ "$TARGET_DISK" =~ ^(/dev/(nvme[0-9]+n[0-9]+|mmcblk[0-9]+))p[0-9]+$ ]]; then
+        TARGET_DISK="${BASH_REMATCH[1]}"
+    fi
 fi
 
 # ==========================================
