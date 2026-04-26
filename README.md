@@ -1,13 +1,13 @@
-# 🛠️ GRUB Fixer (V25 - The "Polishing" Update)
+# 🛠️ GRUB Fixer (V26 - The "Modular" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V25** polishes the experience by fixing edge-case crashes on Virtual Machines and strengthening Btrfs mounting logic. This builds upon the **Backend API** (V24), **Security Hardening** (V23), **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V26** completely refactors the script into a professional modular architecture with a smart on-the-fly loader. This builds upon the **VM Polishing** (V25), **Backend API** (V24), **Security Hardening** (V23), **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
 
 ## 🚀 Usage
 
 Run the "Ultimate Rescue Weapon" directly from your terminal:
 
 ### Option 1: Quick One-Liner (Interactive Mode)
-The classic, smart, and unified interactive experience:
+The classic, smart, and unified interactive experience. (Powered by the V26 Smart Loader to fetch modules on-the-fly):
 ```bash
 curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
 ```
@@ -18,12 +18,22 @@ Skip all questions and let the script fix GRUB silently based on auto-detection 
 curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash -s -- -env l -auto
 ```
 
-### Option 3: Manual Download
+### Option 3: Manual Download (Local Execution)
+Clone the repo to automatically use the local modules:
 ```bash
-curl -O https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh
+git clone https://github.com/ahmed-x86/grub-fixer.git
+cd grub-fixer
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh [FLAGS]
 ```
+
+---
+
+## 🧩 The Modular Update (V26)
+
+* **Architectural Overhaul:** The massive 1200+ line monolith script has been completely deconstructed into a sleek, modular engine. Core functionalities are now isolated into dedicated, easy-to-maintain modules (`api.sh`, `ui.sh`, `crypto.sh`, `core_scan.sh`, `secureboot.sh`).
+* **Smart Module Loader:** Intelligently detects the execution context. If run locally (via `git clone`), it sources the adjacent files seamlessly. If executed via the `curl | bash` one-liner, it downloads the necessary modules on-the-fly to a temporary directory, ensuring the tool never breaks in isolated environments.
+* **Developer Ready:** This architecture paves the exact path needed for the upcoming Python/GTK GUI integration, making the codebase drastically easier to debug and expand.
 
 ---
 
@@ -137,9 +147,9 @@ Bypass prompts, enable headless automation, or integrate with graphical frontend
 
 ## ⚠️ Disclaimer
 
-While V25 is designed to be the safest and smartest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V26 is designed to be the safest, smartest, and cleanest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
-**Developed with by [ahmed-x86](https://github.com/ahmed-x86)**
+**Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
 *Arch Linux Power User | Open Source Enthusiast*
