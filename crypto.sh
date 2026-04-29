@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# PROJECT: GRUB Fixer (V26 Modular)
+# PROJECT: GRUB Fixer (V27 Modular)
 # MODULE: crypto.sh
 # DESCRIPTION: Handles LUKS detection, decryption, LVM activation, GRUB Cryptodisk
 #              injection, and secure relocking.
