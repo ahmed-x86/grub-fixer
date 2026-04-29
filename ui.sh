@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# PROJECT: GRUB Fixer (V26 Modular)
+# PROJECT: GRUB Fixer (V27 Bulletproof Modular)
 # MODULE: ui.sh
 # DESCRIPTION: Handles logging setup, headers, disk listing, and execution timer.
 # ==============================================================================
@@ -8,12 +8,18 @@
 setup_logging_and_header() {
     # --- 2. LOGGING SYSTEM ---
     LOG_FILE="/var/log/grub-fixer.log"
+    
+    # [V27] Bulletproof fallback: If /var/log is read-only in some weird Live ISOs, use /tmp
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+        LOG_FILE="/tmp/grub-fixer.log"
+    fi
+    
     echo "[*] Logging all operations to $LOG_FILE"
     # Redirect all output (stdout and stderr) to tee, which appends to the log file and prints to screen
     exec > >(tee -a "$LOG_FILE") 2>&1
 
     echo "=========================================="
-    echo "GRUB Fixer V26: The Modular Update"
+    echo "GRUB Fixer V27: The Bulletproof Modular Update"
     echo "Date: $(date)"
     echo "Currently supports: x86_64-efi, i386-efi (32-bit) & i386-pc (Legacy)"
     echo "OS Families Supported: Debian, Arch, RedHat, Fedora, SUSE"
