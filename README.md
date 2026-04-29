@@ -1,13 +1,13 @@
-# 🛠️ GRUB Fixer (V26 - The "Modular" Update)
+# 🛠️ GRUB Fixer (V27 - The "Bulletproof" Update)
 
-An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V26** completely refactors the script into a professional modular architecture with a smart on-the-fly loader. This builds upon the **VM Polishing** (V25), **Backend API** (V24), **Security Hardening** (V23), **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
+An automated, bulletproof Bash script designed to repair the GRUB bootloader on **UEFI (64/32-bit)** and **Legacy BIOS** Linux systems. **V27** solidifies the tool with extreme error handling, strict cleanup traps, and absolute execution safety. This builds upon the **Modular Architecture** (V26), **Backend API** (V24), **Security Hardening** (V23), **Secure Boot & Shim Support** (V22), **LUKS Encryption** (V21), and **Chroot Health Checks** (V20) of previous versions.
 
 ## 🚀 Usage
 
 Run the "Ultimate Rescue Weapon" directly from your terminal:
 
 ### Option 1: Quick One-Liner (Interactive Mode)
-The classic, smart, and unified interactive experience. (Powered by the V26 Smart Loader to fetch modules on-the-fly):
+The classic, smart, and unified interactive experience. (Powered by the V27 Smart Loader to fetch modules safely on-the-fly):
 ```bash
 curl -sL https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main/grub-fixer.sh | sudo bash
 ```
@@ -26,6 +26,15 @@ cd grub-fixer
 chmod +x grub-fixer.sh
 sudo ./grub-fixer.sh [FLAGS]
 ```
+
+---
+
+## 🛡️ The Bulletproof Update (V27)
+
+* **Absolute Safety (Trap Engine):** A global `trap` system guarantees that your system is never left in an unstable state. Whether the script finishes successfully, crashes, or you abort via `Ctrl+C`, it will safely unmount all partitions before exiting.
+* **Network Interruption Immunity:** The module downloader now utilizes temporary files (`.tmp`) and strict HTTP checks (`curl -f`). If your internet drops during a `curl | bash` execution, the script will halt safely rather than running incomplete code.
+* **Global Input Validation:** Replaced all fragile input prompts with a robust, pipe-safe (`</dev/tty`) boolean engine. It forces valid `y/n` answers, eliminating crashes from typos or empty inputs during interactive modes.
+* **Read-Only Failsafes:** System logging dynamically routes to `/tmp` if it detects a read-only Live USB environment that blocks `/var/log`.
 
 ---
 
@@ -147,9 +156,9 @@ Bypass prompts, enable headless automation, or integrate with graphical frontend
 
 ## ⚠️ Disclaimer
 
-While V26 is designed to be the safest, smartest, and cleanest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
+While V27 is designed to be the safest, smartest, and cleanest version yet, repairing bootloaders involves critical system files. Always review the **Deep Scan** summary before confirming the repair, especially on complex multi-boot or encrypted setups.
 
 ---
 
 **Developed with  by [ahmed-x86](https://github.com/ahmed-x86)**
-*Arch Linux Power User | Open Source Enthusiast*
+*GNU/Linux Power User | Open Source Enthusiast*
