@@ -42,3 +42,8 @@ Author: ahmed-x86
      - Completely refactored the monolith script into a modular architecture.
      - Modules (api, ui, core_scan, crypto, secureboot) are loaded on-the-fly.
      - Supports both local execution (git clone) and remote execution (curl | bash).
+* **V27:** The Bulletproof Update:
+     - [SEC-4] Implemented strict `trap` engine to automatically unmount and clean up system on `EXIT`, `ERR`, or `INT` (`Ctrl+C`), preventing disk locks.
+     - [SEC-5] Download integrity verification added; `curl` now downloads modules to `.tmp` files first, preventing partial code execution on network drops.
+     - Global `ask_yes_no` function replaces fragile `read` prompts across all modules, ensuring input validation (y/n) even through CLI pipes (`</dev/tty`).
+     - Intelligent `/var/log` fallback to `/tmp` to support read-only Live USB environments.
