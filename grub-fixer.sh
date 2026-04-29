@@ -57,19 +57,6 @@ load_module() {
     fi
 }
 
-# Ensure script is run as root before loading modules to avoid weird permission errors later
-if [[ $EUID -ne 0 ]]; then
-   echo "[-] Error: This script must be run as root. Please use sudo." >&2
-   exit 1
-fi
-
-echo "[*] Initializing GRUB Fixer V26 Engine..."
-load_module "api.sh"
-load_module "ui.sh"
-load_module "crypto.sh"
-load_module "core_scan.sh"
-load_module "secureboot.sh"
-
 # ==============================================================================
 # 3. FLAG PARSING (Handled here to control the main flow)
 # ==============================================================================
@@ -81,7 +68,9 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --sys-info|--json-scan)
             # Route to API module
+            load_module "api.sh"
             handle_api_endpoints "$1"
+            exit 0
             ;;
         --map-std)
             API_MODE=1
@@ -94,20 +83,33 @@ while [[ "$#" -gt 0 ]]; do
             shift 2
             ;;
         -env|--env)
-            if [[ "$2" == "l" || "$2" == "live" ]]; then FORCE_ENV="live"; shift
-            elif [[ "$2" == "h" || "$2" == "host" ]]; then FORCE_ENV="host"; shift
-            else echo "[-] Invalid argument for -env."; exit 1; fi
+            if [[ "$2" == "l" || "$2" == "live" ]]; then FORCE_ENV="live"; shift 2
+            elif [[ "$2" == "h" || "$2" == "host" ]]; then FORCE_ENV="host"; shift 2
+            else echo "[-] Invalid argument for -env." >&2; exit 1; fi
             ;;
         -auto|--auto)
             AUTO_CONFIRM=1
             shift
             ;;
         *)
-            echo "[-] Unknown parameter: $1"
+            echo "[-] Unknown parameter: $1" >&2
             exit 1
             ;;
     esac
 done
+
+# Ensure script is run as root before repair logic (Moved to fix --version/API)
+if [[ $EUID -ne 0 ]]; then
+   echo "[-] Error: This script must be run as root. Please use sudo." >&2
+   exit 1
+fi
+
+echo "[*] Initializing GRUB Fixer V26 Engine..." >&2
+load_module "api.sh"
+load_module "ui.sh"
+load_module "crypto.sh"
+load_module "core_scan.sh"
+load_module "secureboot.sh"
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
@@ -156,11 +158,11 @@ SECURE_BOOT_CHROOT_OTP=$(generate_chroot_mok_otp "$SECURE_BOOT_ENABLED" "$BOOT_M
 GRUB_BACKUP_CMD=""
 if sudo chroot /mnt /bin/bash -c "[ -f /etc/default/grub ]"; then
     GRUB_BACKUP_TS=$(date +%s)
-    GRUB_BACKUP_CMD="cp /etc/default/grub /etc/default/grub.bak.${GRUB_BACKUP_TS} && echo '[+] Backed up /etc/default/grub -> /etc/default/grub.bak.${GRUB_BACKUP_TS}'"
+    GRUB_BACKUP_CMD="cp /etc/default/grub /etc/default/grub.bak.${GRUB_BACKUP_TS} && echo '[+] Backed up /etc/default/grub' >&2"
 fi
 
-echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME"
-echo "[*] Detected Boot Mode: ${BOOT_MODE^^}"
+echo -e "\n[*] Entering chroot and repairing GRUB automatically for: $OS_NAME" >&2
+echo "[*] Detected Boot Mode: ${BOOT_MODE^^}" >&2
 
 # --- ENTER CHROOT ---
 sudo chroot /mnt /bin/bash <<EOF
@@ -203,7 +205,7 @@ EOF
 # Clear OTP
 unset SECURE_BOOT_CHROOT_OTP
 
-echo -e "\n[*] Unmounting filesystems..."
+echo -e "\n[*] Unmounting filesystems..." >&2
 sudo umount -R /mnt || true
 
 # From crypto.sh
