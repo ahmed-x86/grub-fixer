@@ -125,14 +125,17 @@ perform_deep_scan_and_prompt() {
     fi
 
     echo ""
+    is_layout_correct=0
     if [ $AUTO_CONFIRM -eq 1 ]; then
         echo "-> [-auto FLAG ACTIVE] Automatically confirming layout for $ENV_STR..."
-        unified_ans="y"
+        is_layout_correct=1
     else
-        read -p "-> Is this a $ENV_STR and is this your correct disk layout? (y/n): " unified_ans </dev/tty
+        if ask_yes_no "-> Is this a $ENV_STR and is this your correct disk layout? (y/n):" "y"; then
+            is_layout_correct=1
+        fi
     fi
 
-    if [[ "$unified_ans" == "y" || "$unified_ans" == "Y" ]]; then
+    if [ $is_layout_correct -eq 1 ]; then
         if [ $IS_LIVE -eq 0 ]; then
             IS_LOCAL=1
             PRO_MODE_ACCEPTED=0
@@ -147,16 +150,21 @@ perform_deep_scan_and_prompt() {
         fi
     else
         echo "[-] You selected 'n'. System will ask for clarification..."
-        read -p "-> Are you using a Live Environment (L) or a Real Machine (R)? (L/R): " env_ans </dev/tty
-        if [[ "$env_ans" == "L" || "$env_ans" == "l" ]]; then
-            IS_LIVE=1
-            IS_LOCAL=0
-            echo "[*] Proceeding as Live USB (Manual Partition Selection)..."
-        else
-            IS_LIVE=0
-            IS_LOCAL=1
-            echo "[*] Proceeding as Real Machine (Local Repair)..."
-        fi
+        while true; do
+            read -p "-> Are you using a Live Environment (L) or a Real Machine (R)? (L/R): " env_ans </dev/tty
+            env_ans="${env_ans,,}"
+            case "$env_ans" in
+                l|live) 
+                    IS_LIVE=1; IS_LOCAL=0
+                    echo "[*] Proceeding as Live USB (Manual Partition Selection)..."
+                    break ;;
+                r|real) 
+                    IS_LIVE=0; IS_LOCAL=1
+                    echo "[*] Proceeding as Real Machine (Local Repair)..."
+                    break ;;
+                *) echo "[-] Invalid input. Please type 'L' or 'R'." >&2 ;;
+            esac
+        done
         PRO_MODE_ACCEPTED=0
         V17_CONFIRM_ANS="n"
     fi
@@ -272,13 +280,12 @@ execute_insitu_repair() {
         # [V20] In-Situ Package Installation
         if [ ${#MISSING_PKGS[@]} -ne 0 ]; then
             echo "[-] Warning: Missing required packages: ${MISSING_PKGS[*]}"
-            if [ $AUTO_CONFIRM -eq 1 ]; then
-                install_ans="y"
-            else
-                read -p "-> Do you want me to attempt installing them? (y/n): " install_ans </dev/tty
+            attempt_install=0
+            if [ $AUTO_CONFIRM -eq 1 ]; then attempt_install=1; else
+                if ask_yes_no "-> Do you want me to attempt installing them? (y/n):" "y"; then attempt_install=1; fi
             fi
             
-            if [[ "$install_ans" == "y" || "$install_ans" == "Y" ]]; then
+            if [ $attempt_install -eq 1 ]; then
                 if command -v pacman &> /dev/null; then sudo pacman -Sy --noconfirm ${MISSING_PKGS[*]};
                 elif command -v apt-get &> /dev/null; then sudo apt-get update && sudo apt-get install -y ${MISSING_PKGS[*]};
                 elif command -v dnf &> /dev/null; then sudo dnf install -y ${MISSING_PKGS[*]};
@@ -466,16 +473,18 @@ execute_tier_2_3_fallback_mounts() {
             done
             rm -rf "$TMP_EFI_MNT"
 
-            if [ "$V17_CONFIRM_ANS" == "y" ]; then
-                confirm_ans="y"
-                echo "[+] Using accepted basic auto-detection..."
-            elif [ "$V17_CONFIRM_ANS" == "n" ]; then
-                confirm_ans="n"
+            is_config_correct=1
+            if [ "$V17_CONFIRM_ANS" == "n" ]; then
+                is_config_correct=0
+            elif [ "$V17_CONFIRM_ANS" != "y" ]; then
+                if ! ask_yes_no "Is this configuration correct? (y/n):" "y"; then
+                    is_config_correct=0
+                fi
             else
-                read -p "Is this configuration correct? (y/n): " confirm_ans </dev/tty
+                echo "[+] Using accepted basic auto-detection..."
             fi
 
-            if [[ "$confirm_ans" == "y" && -n "$SUGGESTED_ROOT" ]]; then
+            if [[ $is_config_correct -eq 1 && -n "$SUGGESTED_ROOT" ]]; then
                 # --- ACCEPTED AUTO-DETECTION ---
                 echo "[+] Proceeding with Auto-Detected partitions..."
                 root_part="$SUGGESTED_ROOT"
@@ -515,9 +524,9 @@ execute_tier_2_3_fallback_mounts() {
                     fi
                 done
 
-                read -p "Did you create an EFI partition? (y/n): " efi_ans </dev/tty
-                if [ "$efi_ans" == "y" ]; then
+                if ask_yes_no "Did you create an EFI partition? (y/n):" "y"; then
                     BOOT_MODE="efi"
+                    efi_ans="y"
                     while true; do
                         read -p "What is the partition name? (e.g., vda1): " efi_part </dev/tty
                         if [ -b "/dev/$efi_part" ]; then
@@ -531,10 +540,11 @@ execute_tier_2_3_fallback_mounts() {
                 else
                     echo "[*] No EFI selected. Assuming Legacy BIOS."
                     BOOT_MODE="legacy"
+                    efi_ans="n"
                 fi
 
-                read -p "Did you create a separate /boot partition? (y/n): " boot_ans </dev/tty
-                if [ "$boot_ans" == "y" ]; then
+                if ask_yes_no "Did you create a separate /boot partition? (y/n):" "n"; then
+                    boot_ans="y"
                     while true; do
                         read -p "What is the partition name? (e.g., vda2): " boot_part </dev/tty
                         if [ -b "/dev/$boot_part" ]; then
@@ -543,6 +553,8 @@ execute_tier_2_3_fallback_mounts() {
                             echo "[-] Error: Partition '/dev/$boot_part' does not exist."
                         fi
                     done
+                else
+                    boot_ans="n"
                 fi
             fi
 
@@ -550,12 +562,10 @@ execute_tier_2_3_fallback_mounts() {
             echo "[*] Custom Volumes (Optional)"
             while true; do
                 if [ $AUTO_CONFIRM -eq 1 ]; then
-                    custom_ans="n"
-                else
-                    read -p "Do you want to mount any other partitions? (e.g., external /home) (y/n): " custom_ans </dev/tty
+                    break
                 fi
                 
-                if [[ "$custom_ans" == "y" ]]; then
+                if ask_yes_no "Do you want to mount any other partitions? (e.g., external /home) (y/n):" "n"; then
                     read -p "  -> What is the partition name? (e.g., vda4): " c_part </dev/tty
                     if [ -b "/dev/$c_part" ]; then
                         read -p "  -> Where should it be mounted? (e.g., /home): " c_mount </dev/tty
@@ -619,14 +629,9 @@ execute_tier_2_3_fallback_mounts() {
                 sudo mkdir -p "$TARGET_MNT"
                 sudo mount -o subvol="$subvol" "/dev/$root_part" "$TARGET_MNT"
                 
-                while true; do
-                    read -p "-> Do you have another Btrfs subvolume? (y/n): " more_btrfs </dev/tty
-                    more_btrfs=$(echo "$more_btrfs" | tr '[:upper:]' '[:lower:]')
-                    if [[ "$more_btrfs" == "y" || "$more_btrfs" == "n" ]]; then break; else
-                        echo "   [-] Invalid input. Please type 'y' for YES or 'n' for NO."
-                    fi
-                done
-                if [ "$more_btrfs" == "n" ]; then break; fi
+                if ! ask_yes_no "-> Do you have another Btrfs subvolume? (y/n):" "n"; then
+                    break
+                fi
             done
         else
             echo "-> Mounting Standard Root Partition (/dev/$root_part)..."
@@ -740,13 +745,14 @@ perform_chroot_health_check() {
 
     if [ ${#MISSING_CHROOT_PKGS[@]} -ne 0 ]; then
         echo "[-] Warning: Missing required packages inside the target system: ${MISSING_CHROOT_PKGS[*]}"
-        if [ $AUTO_CONFIRM -eq 1 ]; then
-            install_ans="y"
-        else
-            read -p "-> Do you want me to attempt installing them inside chroot? (y/n): " install_ans </dev/tty
+        attempt_chroot_install=0
+        if [ $AUTO_CONFIRM -eq 1 ]; then attempt_chroot_install=1; else
+            if ask_yes_no "-> Do you want me to attempt installing them inside chroot? (y/n):" "y"; then
+                attempt_chroot_install=1
+            fi
         fi
         
-        if [[ "$install_ans" == "y" || "$install_ans" == "Y" ]]; then
+        if [ $attempt_chroot_install -eq 1 ]; then
             echo "[*] Attempting to resolve dependencies..."
             # Running the package manager detection and installation inside chroot
             sudo chroot /mnt /bin/bash <<EOF
