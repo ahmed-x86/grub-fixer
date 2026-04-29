@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# PROJECT: GRUB Fixer (V26 Modular)
+# PROJECT: GRUB Fixer (V27 Bulletproof Modular)
 # MODULE: api.sh
 # DESCRIPTION: Handles JSON outputs and explicit mapping logic for GUI/TUI integration.
 # ==============================================================================
