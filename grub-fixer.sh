@@ -2,8 +2,8 @@
 # ==============================================================================
 # PROJECT: GRUB Fixer
 # AUTHOR: ahmed-x86 
-# VERSION: V26 (The Modular Update)
-# CHANGELOG: See CHANGELOG.md for the full version history (V1 to V26).
+# VERSION: V27 (The Modular Update)
+# CHANGELOG: See CHANGELOG.md for the full version history (V1 to V27).
 # ==============================================================================
 
 # ==============================================================================
@@ -32,11 +32,44 @@ PRO_MODE_ACCEPTED=0
 V17_CONFIRM_ANS=""
 
 # ==============================================================================
+# SAFETY & CLEANUP (TRAP ENGINE)
+# ==============================================================================
+cleanup() {
+    
+    if [ "${CLEANED_UP:-0}" -eq 1 ]; then return; fi
+    CLEANED_UP=1
+    
+    echo -e "\n[*] Exiting... Cleaning up temporary files and mounts safely..." >&2
+    sudo umount -R /mnt 2>/dev/null || true
+    sudo umount -R /tmp/grub-fixer-scan 2>/dev/null || true
+}
+
+trap cleanup EXIT ERR INT TERM
+
+# ==============================================================================
+# [NEW] GLOBAL HELPERS (YES/NO)
+# ==============================================================================
+ask_yes_no() {
+    local prompt="$1"
+    local ans
+    while true; do
+        read -p "$prompt " ans
+        ans="${ans,,}"
+        case "$ans" in
+            y|yes) return 0 ;;
+            n|no)  return 1 ;;
+            *) echo "[-] Invalid input. Please type 'y' or 'n'." >&2 ;;
+        esac
+    done
+}
+export -f ask_yes_no 
+
+# ==============================================================================
 # 2. THE SMART MODULE LOADER
 # ==============================================================================
 # This logic ensures the script works whether cloned locally or piped via curl
 MODULES_DIR="/tmp/grub-fixer-modules"
-REPO_URL="https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main" 
+REPO_URL="https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main" # Adjust 'main' if using a specific branch
 
 load_module() {
     local mod_name="$1"
@@ -47,12 +80,14 @@ load_module() {
     # Otherwise, download it on-the-fly (e.g., user ran curl | bash)
     else
         mkdir -p "$MODULES_DIR"
-        # Download silently, exit if curl fails
-        if ! curl -sL "$REPO_URL/$mod_name" -o "$MODULES_DIR/$mod_name"; then
+        # [MODIFIED] Download silently to a .tmp file first, fail on 404
+        if ! curl -f -sL "$REPO_URL/$mod_name" -o "$MODULES_DIR/${mod_name}.tmp"; then
             echo "[-] CRITICAL ERROR: Failed to download required module: $mod_name" >&2
             echo "    Ensure you have an active internet connection if running via curl pipe." >&2
             exit 1
         fi
+        # [MODIFIED] Move to final name only if download was 100% successful
+        mv "$MODULES_DIR/${mod_name}.tmp" "$MODULES_DIR/$mod_name"
         source "$MODULES_DIR/$mod_name"
     fi
 }
@@ -63,13 +98,15 @@ load_module() {
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --version|-v)
-            echo "GRUB Fixer V26 (The Modular Update)"
+            echo "GRUB Fixer V27 (The Modular Update)"
+            CLEANED_UP=1
             exit 0
             ;;
         --sys-info|--json-scan)
             # Route to API module
             load_module "api.sh"
             handle_api_endpoints "$1"
+            CLEANED_UP=1
             exit 0
             ;;
         --map-std)
@@ -104,14 +141,14 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-echo "[*] Initializing GRUB Fixer V26 Engine..." >&2
+echo "[*] Initializing GRUB Fixer V27 Engine..." >&2
 load_module "api.sh"
 load_module "ui.sh"
 load_module "crypto.sh"
 load_module "core_scan.sh"
 load_module "secureboot.sh"
 
-set -e # Exit immediately if a command exits with a non-zero status.
+set -e 
 
 # ==============================================================================
 # 4. MAIN EXECUTION FLOW
