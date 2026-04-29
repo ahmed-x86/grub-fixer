@@ -36,7 +36,7 @@ V17_CONFIRM_ANS=""
 # ==============================================================================
 # This logic ensures the script works whether cloned locally or piped via curl
 MODULES_DIR="/tmp/grub-fixer-modules"
-REPO_URL="https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main" # Adjust 'main' if using a specific branch
+REPO_URL="https://raw.githubusercontent.com/ahmed-x86/grub-fixer/main" 
 
 load_module() {
     local mod_name="$1"
