@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# PROJECT: GRUB Fixer (V26 Modular)
+# VERSION: V27 (The Modular Update)
 # MODULE: secureboot.sh
 # DESCRIPTION: Handles Secure Boot state detection, dynamic MOK OTP generation,
 #              and sbctl/Shim signing integration for both Local and Chroot modes.
