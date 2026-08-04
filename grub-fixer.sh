@@ -42,6 +42,7 @@ cleanup() {
     echo -e "\n[*] Exiting... Cleaning up temporary files and mounts safely..." >&2
     sudo umount -R /mnt 2>/dev/null || true
     sudo umount -R /tmp/grub-fixer-scan 2>/dev/null || true
+    exit 130
 }
 
 trap cleanup EXIT ERR INT TERM
