@@ -53,7 +53,7 @@ ask_yes_no() {
     local prompt="$1"
     local ans
     while true; do
-        read -p "$prompt " ans
+        read -p "$prompt " ans </dev/tty
         ans="${ans,,}"
         case "$ans" in
             y|yes) return 0 ;;
