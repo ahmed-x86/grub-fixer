@@ -14,6 +14,8 @@ AUTO_CONFIRM=0
 API_MODE=0
 API_MAP_STD=""
 API_MAP_BTRFS=""
+FAST_MODE=0
+CUSTOM_BOOTLOADER_ID=""
 
 # Arrays & State Variables used across modules
 declare -a custom_parts
@@ -129,6 +131,20 @@ while [[ "$#" -gt 0 ]]; do
             AUTO_CONFIRM=1
             shift
             ;;
+        -fast|--fast)
+            # [V28] Skips confirmation prompts and collapses the chroot health
+            # check into a single chroot call instead of one-exec-per-package.
+            FAST_MODE=1
+            AUTO_CONFIRM=1
+            shift
+            ;;
+        --bootloader-id)
+            # [V28] Lets a GUI/CLI user pick any EFI bootloader-id/label
+            # (e.g. "EndeavourOS", "arch_ahmed") instead of the auto-detected OS name.
+            if [ -z "$2" ]; then echo "[-] --bootloader-id requires a value." >&2; exit 1; fi
+            CUSTOM_BOOTLOADER_ID="$2"
+            shift 2
+            ;;
         *)
             echo "[-] Unknown parameter: $1" >&2
             exit 1
@@ -190,8 +206,13 @@ perform_chroot_health_check
 extract_target_disk_legacy
 detect_uefi_bitness
 
+# [V28] Allow overriding the EFI bootloader-id/label (any string, e.g. from a GUI)
+EFFECTIVE_BOOTLOADER_ID="${CUSTOM_BOOTLOADER_ID:-$OS_NAME}"
+[ -n "$CUSTOM_BOOTLOADER_ID" ] && echo "[*] Using custom bootloader-id: $EFFECTIVE_BOOTLOADER_ID" >&2
+
 # From secureboot.sh
 SECURE_BOOT_CHROOT_OTP=$(generate_chroot_mok_otp "$SECURE_BOOT_ENABLED" "$BOOT_MODE")
+WINFIX_SCRIPT=$(get_chroot_winfix_script "$BOOT_MODE" "$EFFECTIVE_BOOTLOADER_ID")
 # Backup config
 GRUB_BACKUP_CMD=""
 if sudo chroot /mnt /bin/bash -c "[ -f /etc/default/grub ]"; then
@@ -212,14 +233,16 @@ if [ "$BOOT_MODE" == "efi" ]; then
     echo "-> Installing for $EFI_TARGET platform (with --removable flag for VM support)..."
     if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$TARGET_ID" =~ (debian|ubuntu|pop) ]]; then
         echo "   [i] Debian/Ubuntu based system with Secure Boot detected. Forcing UEFI Secure Boot target."
-        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --uefi-secure-boot
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$EFFECTIVE_BOOTLOADER_ID" --uefi-secure-boot
     else
-        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$OS_NAME" --removable
+        $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$efi_mount_path --bootloader-id="$EFFECTIVE_BOOTLOADER_ID" --removable
     fi
 else
     echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
     $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
 fi
+
+$WINFIX_SCRIPT
 
 $GRUB_BACKUP_CMD
 
@@ -234,7 +257,7 @@ $(get_chroot_cryptodisk_script "$HAS_LUKS")
 echo "-> Generating GRUB configuration..."
 $GRUB_MKCONFIG_CMD -o $GRUB_CFG_PATH
 
-$(get_chroot_secureboot_script "$SECURE_BOOT_CHROOT_OTP" "$efi_mount_path" "$OS_NAME" "$SECURE_BOOT_ENABLED" "$BOOT_MODE")
+$(get_chroot_secureboot_script "$SECURE_BOOT_CHROOT_OTP" "$efi_mount_path" "$EFFECTIVE_BOOTLOADER_ID" "$SECURE_BOOT_ENABLED" "$BOOT_MODE")
 
 echo "-> Exiting chroot environment..."
 exit

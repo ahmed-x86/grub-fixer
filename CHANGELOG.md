@@ -47,3 +47,12 @@ Author: ahmed-x86
      - [SEC-5] Download integrity verification added; `curl` now downloads modules to `.tmp` files first, preventing partial code execution on network drops.
      - Global `ask_yes_no` function replaces fragile `read` prompts across all modules, ensuring input validation (y/n) even through CLI pipes (`</dev/tty`).
      - Intelligent `/var/log` fallback to `/tmp` to support read-only Live USB environments.
+- **V28:** Performance, Boot Order & Custom ID Update:
+     - **Performance Optimizations:** Consolidated up to 5 separate chroot entries during package checks into a single chroot execution, eliminating repeated `fork`/`exec` and `sudo` overhead.
+     - **Fast Mode Flag:** Added `-fast` / `--fast` flag to automatically enable `AUTO_CONFIRM`, bypassing all interactive prompts for seamless automation.
+     - **Windows Dual-Boot NVRAM Fix:** Resolved post-update boot hijacking where Windows Update resets the NVRAM `BootOrder` to place "Windows Boot Manager" first. Implemented `fix_windows_boot_order` (in-situ) and `get_chroot_winfix_script` (chroot), which trigger post-EFI installation to inspect `efibootmgr` entries and restore GRUB to the top priority without deleting the Windows entry (preserving chainload accessibility via the GRUB menu).
+     - **Custom Bootloader ID:** Added `--bootloader-id "<name>"` flag (e.g., `--bootloader-id "EndeavourOS"`), dynamically overriding the default distribution name across all operations, including `grub-install`, `sbctl` signing, and Windows boot order repair. Fully supported across chroot, in-situ, and backend API modes.
+     - **Usage Example:**
+       ```bash
+       ./grub-fixer.sh --fast --bootloader-id "EndeavourOS"
+       ```

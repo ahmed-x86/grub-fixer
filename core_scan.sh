@@ -298,16 +298,23 @@ execute_insitu_repair() {
              echo "[+] Health Check Passed: All required packages are installed."
         fi
 
+        # [V28] Allow overriding the EFI bootloader-id/label (any string, e.g. from a GUI)
+        EFFECTIVE_BOOTLOADER_ID="${CUSTOM_BOOTLOADER_ID:-$OS_NAME}"
+        [ -n "$CUSTOM_BOOTLOADER_ID" ] && echo "[*] Using custom bootloader-id: $EFFECTIVE_BOOTLOADER_ID"
+
         if [ "$LOCAL_BOOT_MODE" == "efi" ]; then
             echo "-> Installing for $EFI_TARGET platform on In-Situ system..."
-            
+
             # [V22] Shim Installation Logic
             if [ "$SECURE_BOOT_ENABLED" -eq 1 ] && [[ "$ID" =~ (debian|ubuntu|pop) ]]; then
                 echo "   [i] Debian/Ubuntu based system with Secure Boot detected. Forcing UEFI Secure Boot target."
-                $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --uefi-secure-boot
+                $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$EFFECTIVE_BOOTLOADER_ID" --uefi-secure-boot
             else
-                $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$OS_NAME" --removable
+                $GRUB_INSTALL_CMD --target=$EFI_TARGET --efi-directory=$LOCAL_EFI_MNT --bootloader-id="$EFFECTIVE_BOOTLOADER_ID" --removable
             fi
+
+            # [V28] Windows dual-boot NVRAM recovery (re-promote us without deleting Windows' entry)
+            fix_windows_boot_order "$LOCAL_BOOT_MODE" "$EFFECTIVE_BOOTLOADER_ID"
         else
             echo "-> Installing GRUB for i386-pc (Legacy BIOS) on disk: $TARGET_DISK..."
             $GRUB_INSTALL_CMD --target=i386-pc "$TARGET_DISK"
@@ -356,7 +363,7 @@ execute_insitu_repair() {
                  unset MOK_OTP
             elif command -v sbctl &> /dev/null; then
                  echo "-> Arch Linux 'sbctl' detected. Attempting to sign GRUB..."
-                 sudo sbctl sign -s "$LOCAL_EFI_MNT/EFI/$OS_NAME/grubx64.efi" || true
+                 sudo sbctl sign -s "$LOCAL_EFI_MNT/EFI/$EFFECTIVE_BOOTLOADER_ID/grubx64.efi" || true
             fi
         fi
 
@@ -728,20 +735,33 @@ perform_chroot_health_check() {
     echo -e "\n[*] Performing Chroot Health Check..."
     MISSING_CHROOT_PKGS=()
 
-    # Check commands inside chroot
-    if ! sudo chroot /mnt /bin/bash -c "command -v $GRUB_INSTALL_CMD" &> /dev/null; then MISSING_CHROOT_PKGS+=("grub2" "grub"); fi
-    if ! sudo chroot /mnt /bin/bash -c "command -v os-prober" &> /dev/null; then MISSING_CHROOT_PKGS+=("os-prober"); fi
-    if [ "$HAS_LUKS" -eq 1 ] && ! sudo chroot /mnt /bin/bash -c "command -v cryptsetup" &> /dev/null; then MISSING_CHROOT_PKGS+=("cryptsetup"); fi
-
+    # [V28 SPEED] Single chroot invocation instead of one exec per command.
+    # Entering/leaving a chroot (and the surrounding sudo) has real fork/exec
+    # overhead - doing 5 separate `sudo chroot ... command -v X` calls used to
+    # add up to a noticeable chunk of total repair time. One combined check
+    # script run once inside the chroot does the same checks in a single exec.
+    CHECK_SCRIPT="command -v $GRUB_INSTALL_CMD >/dev/null 2>&1 || echo grub2:grub; "
+    CHECK_SCRIPT+="command -v os-prober >/dev/null 2>&1 || echo os-prober; "
+    if [ "$HAS_LUKS" -eq 1 ]; then
+        CHECK_SCRIPT+="command -v cryptsetup >/dev/null 2>&1 || echo cryptsetup; "
+    fi
     if [ "$BOOT_MODE" == "efi" ]; then
-        if ! sudo chroot /mnt /bin/bash -c "command -v efibootmgr" &> /dev/null; then MISSING_CHROOT_PKGS+=("efibootmgr"); fi
-        
-        # V22: Check for shim if Secure Boot is enabled
+        CHECK_SCRIPT+="command -v efibootmgr >/dev/null 2>&1 || echo efibootmgr; "
         if [ "$SECURE_BOOT_ENABLED" -eq 1 ]; then
-            if ! sudo chroot /mnt /bin/bash -c "command -v mokutil" &> /dev/null; then MISSING_CHROOT_PKGS+=("mokutil"); fi
+            CHECK_SCRIPT+="command -v mokutil >/dev/null 2>&1 || echo mokutil; "
             echo "   [i] Ensure packages like 'shim', 'shim-signed', or 'grub-efi-amd64-signed' are installed for your distro."
         fi
     fi
+
+    MISSING_RAW=$(sudo chroot /mnt /bin/bash -c "$CHECK_SCRIPT" 2>/dev/null)
+    while IFS= read -r pkg_line; do
+        [ -z "$pkg_line" ] && continue
+        if [ "$pkg_line" == "grub2:grub" ]; then
+            MISSING_CHROOT_PKGS+=("grub2" "grub")
+        else
+            MISSING_CHROOT_PKGS+=("$pkg_line")
+        fi
+    done <<< "$MISSING_RAW"
 
     if [ ${#MISSING_CHROOT_PKGS[@]} -ne 0 ]; then
         echo "[-] Warning: Missing required packages inside the target system: ${MISSING_CHROOT_PKGS[*]}"
